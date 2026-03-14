@@ -12,6 +12,22 @@
 - 书籍信息展示（标题、作者、出版社、ISBN等）
 - 书籍评分和阅读进度追踪
 
+**截图：**
+
+1）EPUB、PDF提取工具，PDF有点格式问题，建议只用EPUB效果最好
+
+![image-20260314215900708](D:\workspace\TraeProjects\BookStore\Screenshot\image-20260314215900708.png)
+
+2）Web管理界面
+
+![image-20260314220302773](D:\workspace\TraeProjects\BookStore\Screenshot\image-20260314220302773.png)
+
+![image-20260314220405948](D:\workspace\TraeProjects\BookStore\Screenshot\image-20260314220405948.png)
+
+![image-20260314220447083](D:\workspace\TraeProjects\BookStore\Screenshot\image-20260314220447083.png)
+
+
+
 ### 📑 内容提取
 - **PDF 提取**：提取文本、图片、表格
 - **EPUB 提取**：提取章节层级结构、图片、样式
