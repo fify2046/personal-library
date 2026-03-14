@@ -122,28 +122,33 @@ cd BookStore
 
 ```sql
 CREATE DATABASE ebook_db;
+
+-- 执行./InitBookData/sql/init_database.sql 创建表及索引
 ```
 
 ### 3. 后端配置
 
 ```bash
+## 后端运行步骤（必看）
+
+# 1. 进入后端目录
 cd backend
 
-# 创建虚拟环境
+# 2. 创建 Python 虚拟环境（推荐！隔离项目依赖，避免版本冲突）
 python -m venv venv
 
-# 激活虚拟环境
-# Windows:
+# 3. 激活虚拟环境
+# Windows 系统：
 venv\Scripts\activate
-# macOS/Linux:
+# macOS / Linux 系统：
 source venv/bin/activate
 
-# 安装依赖
+# 4. 安装项目依赖
 pip install -r requirements.txt
 
-# 配置环境变量
+# 5. 配置环境变量（数据库连接）
 cp .env.example .env
-# 编辑 .env 文件，配置数据库连接信息
+# 然后编辑 .env 文件，填入你的 PostgreSQL 数据库信息
 ```
 
 ### 4. 前端配置
@@ -172,7 +177,11 @@ cd frontend
 npm run dev
 ```
 
-访问 http://localhost:5173 即可使用。
+访问 http://localhost:3000 即可使用。
+
+Windows也可使用 **start.bat** 一键启动脚本
+
+
 
 ## ⚙️ 配置说明
 
