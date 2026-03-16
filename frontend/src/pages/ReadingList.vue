@@ -56,14 +56,26 @@
         </div>
         
         <div v-else class="book-grid">
-          <div 
-            v-for="book in readingList" 
-            :key="book.book_id" 
+          <div
+            v-for="book in readingList"
+            :key="book.book_id"
             class="book-card"
             @click="goToBook(book)"
           >
             <div class="book-cover">
-              <div class="cover-placeholder">
+              <el-image
+                v-if="book.cover_path"
+                :src="`/api/images/${encodeURIComponent(book.cover_path)}`"
+                fit="contain"
+                class="cover-image"
+              >
+                <template #error>
+                  <div class="cover-placeholder">
+                    <el-icon><Document /></el-icon>
+                  </div>
+                </template>
+              </el-image>
+              <div v-else class="cover-placeholder">
                 <el-icon><Document /></el-icon>
               </div>
               <span class="file-type-badge">{{ book.file_type.toUpperCase() }}</span>
@@ -306,6 +318,14 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+}
+
+.cover-image {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
 }
 
 .cover-placeholder {

@@ -513,11 +513,15 @@ const goToReading = (item) => {
   align-items: center;
   justify-content: center;
   position: relative;
+  overflow: hidden;
 }
 
 .cover-image {
-  width: 100%;
-  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
 }
 
 .cover-placeholder {

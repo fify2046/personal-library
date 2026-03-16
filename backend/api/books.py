@@ -19,6 +19,7 @@ class BookListItem(BaseModel):
     file_type: str
     chapter_count: int = 0
     image_count: int = 0
+    cover_path: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -35,6 +36,7 @@ class BookDetail(BaseModel):
     chapter_count: int
     image_count: int
     rating: int = 0
+    cover_path: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -92,9 +94,10 @@ def get_books(
             isbn=book.isbn,
             file_type=book.file_type,
             chapter_count=chapter_count,
-            image_count=image_count
+            image_count=image_count,
+            cover_path=book.cover_path
         ))
-    
+
     return BookListResponse(total=total, list=result)
 
 @router.get("/{book_id}", response_model=BookDetail)
@@ -122,7 +125,8 @@ def get_book(book_id: str, db: Session = Depends(get_db)):
         file_size=book.file_size,
         chapter_count=chapter_count,
         image_count=image_count,
-        rating=book.rating or 0
+        rating=book.rating or 0,
+        cover_path=book.cover_path
     )
 
 @router.get("/{book_id}/chapters")

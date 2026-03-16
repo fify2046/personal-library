@@ -249,38 +249,44 @@ class DatabaseManager:
             logger.error(f"批量插入段落失败: {e}")
             return 0
 
-    def insert_paragraphs_batch_with_footnote(self, paragraphs: List[Tuple[str, str, int, str, bool]]) -> int:
+    def insert_paragraphs_batch_with_footnote(self, paragraphs: List[Tuple[str, str, int, str, bool]], batch_size: int = 1000) -> int:
         if not paragraphs:
             return 0
         try:
+            total_inserted = 0
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
-                    for para in paragraphs:
-                        chapter_id, content, para_order, para_type, is_footnote = para
-                        cur.execute("""
+                    # 分批插入，每批1000条
+                    for i in range(0, len(paragraphs), batch_size):
+                        batch = paragraphs[i:i + batch_size]
+                        cur.executemany("""
                             INSERT INTO paragraphs (chapter_id, content, para_order, para_type, is_footnote)
                             VALUES (%s, %s, %s, %s, %s)
-                        """, (chapter_id, content, para_order, para_type, is_footnote))
-                    inserted = len(paragraphs)
-                    logger.info(f"批量插入段落: {inserted} 条")
-                    return inserted
+                        """, batch)
+                        total_inserted += cur.rowcount
+                    logger.info(f"批量插入段落: {total_inserted} 条，分{len(paragraphs) // batch_size + 1}批")
+                    return total_inserted
         except Exception as e:
             logger.error(f"批量插入段落失败: {e}")
             return 0
 
-    def insert_images_batch(self, images: List[Tuple[str, str, int, int, int, str, str]]) -> int:
+    def insert_images_batch(self, images: List[Tuple[str, str, int, int, int, str, str]], batch_size: int = 500) -> int:
         if not images:
             return 0
         try:
+            total_inserted = 0
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.executemany("""
-                        INSERT INTO images (chapter_id, image_path, image_order, width, height, alt, original_format)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """, images)
-                    inserted = cur.rowcount
-                    logger.info(f"批量插入图片: {inserted} 条")
-                    return inserted
+                    # 分批插入，每批500条
+                    for i in range(0, len(images), batch_size):
+                        batch = images[i:i + batch_size]
+                        cur.executemany("""
+                            INSERT INTO images (chapter_id, image_path, image_order, width, height, alt, original_format)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """, batch)
+                        total_inserted += cur.rowcount
+                    logger.info(f"批量插入图片: {total_inserted} 条，分{len(images) // batch_size + 1}批")
+                    return total_inserted
         except Exception as e:
             logger.error(f"批量插入图片失败: {e}")
             return 0
@@ -310,6 +316,164 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"删除书籍失败: {e}")
             return False
+
+
+    def vacuum_analyze(self, full: bool = False) -> Tuple[bool, str]:
+        """执行 VACUUM ANALYZE 清理和更新统计信息
+        
+        Args:
+            full: 是否执行 VACUUM FULL（会锁表，更彻底）
+        """
+        try:
+            # VACUUM 不能在事务块中执行，需要单独连接
+            import psycopg2
+            conn = psycopg2.connect(
+                host=self.host,
+                port=self.port,
+                database=self.database,
+                user=self.user,
+                password=self.password
+            )
+            conn.autocommit = True  # VACUUM 需要 autocommit
+            
+            with conn.cursor() as cur:
+                # 获取实际存在的表
+                cur.execute("""
+                    SELECT tablename FROM pg_tables 
+                    WHERE schemaname = 'public' 
+                    AND tablename IN ('books', 'chapters', 'paragraphs', 'images', 'reading_history', 'favorites', 'reading_list')
+                    ORDER BY tablename
+                """)
+                tables = [row[0] for row in cur.fetchall()]
+                
+                for table in tables:
+                    try:
+                        if full:
+                            logger.info(f"执行 VACUUM FULL on {table}...")
+                            cur.execute(f"VACUUM FULL {table}")
+                        else:
+                            logger.info(f"执行 VACUUM on {table}...")
+                            cur.execute(f"VACUUM {table}")
+                        
+                        logger.info(f"执行 ANALYZE on {table}...")
+                        cur.execute(f"ANALYZE {table}")
+                    except Exception as e:
+                        logger.warning(f"处理表 {table} 时出错: {e}")
+                
+                # 获取表大小信息
+                cur.execute("""
+                    SELECT schemaname, tablename, 
+                           pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size
+                    FROM pg_tables 
+                    WHERE schemaname = 'public'
+                    ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+                """)
+                sizes = cur.fetchall()
+                size_info = "\n".join([f"  {t[1]}: {t[2]}" for t in sizes])
+                
+            conn.close()
+            
+            msg = f"数据库维护完成\n表大小:\n{size_info}"
+            logger.info(msg)
+            return True, msg
+            
+        except Exception as e:
+            logger.error(f"数据库维护失败: {e}")
+            return False, str(e)
+
+    def reindex_tables(self) -> Tuple[bool, str]:
+        """重建所有索引"""
+        try:
+            # REINDEX CONCURRENTLY 不能在事务块中，需要单独连接
+            import psycopg2
+            conn = psycopg2.connect(
+                host=self.host,
+                port=self.port,
+                database=self.database,
+                user=self.user,
+                password=self.password
+            )
+            conn.autocommit = True
+            
+            with conn.cursor() as cur:
+                # 获取所有索引
+                cur.execute("""
+                    SELECT indexname, tablename 
+                    FROM pg_indexes 
+                    WHERE schemaname = 'public'
+                    ORDER BY tablename
+                """)
+                indexes = cur.fetchall()
+                
+                reindexed = []
+                for idx_name, table_name in indexes:
+                    try:
+                        logger.info(f"重建索引: {idx_name} on {table_name}")
+                        # 使用 REINDEX INDEX CONCURRENTLY 避免锁表
+                        cur.execute(f"REINDEX INDEX CONCURRENTLY {idx_name}")
+                        reindexed.append(f"{idx_name} ({table_name})")
+                    except Exception as e:
+                        logger.warning(f"重建索引 {idx_name} 失败: {e}")
+                        # 尝试普通 REINDEX
+                        try:
+                            cur.execute(f"REINDEX INDEX {idx_name}")
+                            reindexed.append(f"{idx_name} ({table_name}) - 非并发")
+                        except Exception as e2:
+                            logger.error(f"重建索引 {idx_name} 完全失败: {e2}")
+            
+            conn.close()
+                    
+            msg = f"重建索引完成，共 {len(reindexed)} 个索引"
+            logger.info(msg)
+            return True, msg
+            
+        except Exception as e:
+            logger.error(f"重建索引失败: {e}")
+            return False, str(e)
+
+    def get_table_stats(self) -> Dict[str, Any]:
+        """获取表统计信息"""
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    stats = {}
+                    
+                    # 表大小和行数
+                    cur.execute("""
+                        SELECT 
+                            relname as table_name,
+                            n_live_tup as live_rows,
+                            n_dead_tup as dead_rows,
+                            pg_size_pretty(pg_total_relation_size(relid)) as total_size,
+                            pg_size_pretty(pg_relation_size(relid)) as table_size,
+                            pg_size_pretty(pg_indexes_size(relid)) as index_size,
+                            last_vacuum,
+                            last_autovacuum,
+                            last_analyze,
+                            last_autoanalyze
+                        FROM pg_stat_user_tables
+                        WHERE schemaname = 'public'
+                        ORDER BY pg_total_relation_size(relid) DESC
+                    """)
+                    
+                    for row in cur.fetchall():
+                        stats[row[0]] = {
+                            'live_rows': row[1],
+                            'dead_rows': row[2],
+                            'total_size': row[3],
+                            'table_size': row[4],
+                            'index_size': row[5],
+                            'last_vacuum': row[6],
+                            'last_autovacuum': row[7],
+                            'last_analyze': row[8],
+                            'last_autoanalyze': row[9]
+                        }
+                    
+                    return stats
+                    
+        except Exception as e:
+            logger.error(f"获取表统计信息失败: {e}")
+            return {}
 
 
 _db_manager = None

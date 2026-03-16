@@ -43,6 +43,10 @@ class EbookExtractorApp:
         self.skip_count = 0
 
         self.include_subdirs = tk.BooleanVar(value=True)
+        
+        # 线程数配置
+        self.chapter_workers = tk.IntVar(value=8)
+        self.image_workers = tk.IntVar(value=4)
 
         self._init_dirs()
         self._init_ui()
@@ -50,18 +54,19 @@ class EbookExtractorApp:
 
     def _init_dirs(self):
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        self.book_dir = os.path.join(base_dir, "books")
         self.image_dir = os.path.join(base_dir, "..\images")
-        self.temp_dir = os.path.join(base_dir, "temp")
 
-        os.makedirs(self.book_dir, exist_ok=True)
         os.makedirs(self.image_dir, exist_ok=True)
-        os.makedirs(self.temp_dir, exist_ok=True)
 
     def _init_extractors(self):
         self.image_processor = ImageProcessor(self.image_dir)
         self.pdf_extractor = PDFExtractor(self.image_processor)
-        self.epub_extractor = EPUBExtractor(self.image_processor)
+        # 传入UI配置的线程数
+        self.epub_extractor = EPUBExtractor(
+            self.image_processor,
+            chapter_workers=self.chapter_workers.get(),
+            image_workers=self.image_workers.get()
+        )
 
     def _init_ui(self):
         main_frame = ttk.Frame(self.root, padding="10")
@@ -120,7 +125,7 @@ class EbookExtractorApp:
 
         ttk.Label(type_frame, text="处理类型:").pack(side=tk.LEFT, padx=5)
 
-        self.pdf_var = tk.BooleanVar(value=True)
+        self.pdf_var = tk.BooleanVar(value=False)
         self.pdf_check = ttk.Checkbutton(type_frame, text="PDF", variable=self.pdf_var)
         self.pdf_check.pack(side=tk.LEFT, padx=5)
 
@@ -128,8 +133,21 @@ class EbookExtractorApp:
         self.epub_check = ttk.Checkbutton(type_frame, text="EPUB", variable=self.epub_var)
         self.epub_check.pack(side=tk.LEFT, padx=5)
 
-        ttk.Button(type_frame, text="重置数据", command=self.reset_data).pack(side=tk.LEFT, padx=20)
-        ttk.Button(type_frame, text="删除重复图书", command=self.delete_duplicate_books).pack(side=tk.LEFT, padx=20)
+        ttk.Button(type_frame, text="重置数据", command=self.reset_data).pack(side=tk.LEFT, padx=10)
+        ttk.Button(type_frame, text="删除重复图书", command=self.delete_duplicate_books).pack(side=tk.LEFT, padx=10)
+        ttk.Button(type_frame, text="数据库维护", command=self.maintain_database).pack(side=tk.LEFT, padx=10)
+
+        # 线程数配置
+        workers_frame = ttk.LabelFrame(dir_frame, text="线程配置", padding="5")
+        workers_frame.grid(row=1, column=3, rowspan=2, padx=10, pady=5, sticky=tk.N)
+
+        ttk.Label(workers_frame, text="章节提取:").grid(row=0, column=0, sticky=tk.W, padx=2)
+        self.chapter_workers_spin = ttk.Spinbox(workers_frame, from_=1, to=32, width=5, textvariable=self.chapter_workers)
+        self.chapter_workers_spin.grid(row=0, column=1, padx=2)
+
+        ttk.Label(workers_frame, text="图片保存:").grid(row=1, column=0, sticky=tk.W, padx=2, pady=2)
+        self.image_workers_spin = ttk.Spinbox(workers_frame, from_=1, to=32, width=5, textvariable=self.image_workers)
+        self.image_workers_spin.grid(row=1, column=1, padx=2, pady=2)
 
         status_frame = ttk.Frame(dir_frame)
         status_frame.grid(row=2, column=0, columnspan=3, pady=5)
@@ -410,6 +428,147 @@ class EbookExtractorApp:
             messagebox.showerror("错误", f"删除重复图书失败: {str(e)}")
             self.log(f"删除重复图书失败: {str(e)}")
 
+    def maintain_database(self):
+        if not self.db_manager:
+            messagebox.showwarning("警告", "请先测试数据库连接")
+            return
+
+        # 创建维护选项对话框
+        dialog = tk.Toplevel(self.root)
+        dialog.title("数据库维护")
+        dialog.geometry("400x300")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="选择维护操作:", font=('Arial', 12, 'bold')).pack(pady=10)
+
+        # VACUUM 选项
+        vacuum_frame = ttk.LabelFrame(dialog, text="VACUUM (清理死元组)", padding="10")
+        vacuum_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        ttk.Button(vacuum_frame, text="执行 VACUUM",
+                   command=lambda: self._run_vacuum(False, dialog)).pack(side=tk.LEFT, padx=5)
+        ttk.Button(vacuum_frame, text="执行 VACUUM FULL (更彻底，会锁表)",
+                   command=lambda: self._run_vacuum(True, dialog)).pack(side=tk.LEFT, padx=5)
+
+        # REINDEX 选项
+        reindex_frame = ttk.LabelFrame(dialog, text="REINDEX (重建索引)", padding="10")
+        reindex_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        ttk.Button(reindex_frame, text="重建所有索引",
+                   command=lambda: self._run_reindex(dialog)).pack(pady=5)
+
+        # 统计信息
+        stats_frame = ttk.LabelFrame(dialog, text="统计信息", padding="10")
+        stats_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        ttk.Button(stats_frame, text="查看表统计",
+                   command=lambda: self._show_table_stats(dialog)).pack(pady=5)
+
+        ttk.Button(dialog, text="关闭", command=dialog.destroy).pack(pady=10)
+
+    def _run_vacuum(self, full: bool, dialog):
+        """执行 VACUUM"""
+        if full:
+            if not messagebox.askyesno("确认", "VACUUM FULL 会锁表，期间无法访问数据，确定执行？"):
+                return
+
+        self.log(f"开始执行 VACUUM{' FULL' if full else ''}...")
+        dialog.destroy()
+
+        def vacuum_thread():
+            try:
+                success, msg = self.db_manager.vacuum_analyze(full)
+                if success:
+                    self.root.after(0, lambda: messagebox.showinfo("完成", msg))
+                    self.log(f"VACUUM 完成: {msg}")
+                else:
+                    self.root.after(0, lambda: messagebox.showerror("错误", f"VACUUM 失败: {msg}"))
+                    self.log(f"VACUUM 失败: {msg}")
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror("错误", f"VACUUM 失败: {str(e)}"))
+                self.log(f"VACUUM 失败: {str(e)}")
+
+        threading.Thread(target=vacuum_thread, daemon=True).start()
+
+    def _run_reindex(self, dialog):
+        """执行 REINDEX"""
+        if not messagebox.askyesno("确认", "确定要重建所有索引吗？"):
+            return
+
+        self.log("开始重建索引...")
+        dialog.destroy()
+
+        def reindex_thread():
+            try:
+                success, msg = self.db_manager.reindex_tables()
+                if success:
+                    self.root.after(0, lambda: messagebox.showinfo("完成", msg))
+                    self.log(f"重建索引完成: {msg}")
+                else:
+                    self.root.after(0, lambda: messagebox.showerror("错误", f"重建索引失败: {msg}"))
+                    self.log(f"重建索引失败: {msg}")
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror("错误", f"重建索引失败: {str(e)}"))
+                self.log(f"重建索引失败: {str(e)}")
+
+        threading.Thread(target=reindex_thread, daemon=True).start()
+
+    def _show_table_stats(self, dialog):
+        """显示表统计信息"""
+        try:
+            stats = self.db_manager.get_table_stats()
+            if not stats:
+                messagebox.showwarning("警告", "无法获取统计信息")
+                return
+
+            # 创建统计窗口
+            stats_dialog = tk.Toplevel(dialog)
+            stats_dialog.title("数据库表统计信息")
+            stats_dialog.geometry("700x400")
+            stats_dialog.transient(dialog)
+
+            # 创建表格
+            columns = ('表名', '活行数', '死行数', '总大小', '表大小', '索引大小', '上次VACUUM', '上次ANALYZE')
+            tree = ttk.Treeview(stats_dialog, columns=columns, show='headings')
+
+            for col in columns:
+                tree.heading(col, text=col)
+                tree.column(col, width=80)
+
+            tree.column('表名', width=100)
+            tree.column('总大小', width=80)
+            tree.column('上次VACUUM', width=120)
+            tree.column('上次ANALYZE', width=120)
+
+            # 添加数据
+            for table_name, info in stats.items():
+                tree.insert('', 'end', values=(
+                    table_name,
+                    info.get('live_rows', 0),
+                    info.get('dead_rows', 0),
+                    info.get('total_size', ''),
+                    info.get('table_size', ''),
+                    info.get('index_size', ''),
+                    str(info.get('last_vacuum') or info.get('last_autovacuum') or '从未')[:19],
+                    str(info.get('last_analyze') or info.get('last_autoanalyze') or '从未')[:19]
+                ))
+
+            # 添加滚动条
+            scrollbar = ttk.Scrollbar(stats_dialog, orient=tk.VERTICAL, command=tree.yview)
+            tree.configure(yscrollcommand=scrollbar.set)
+
+            tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
+
+            ttk.Button(stats_dialog, text="关闭", command=stats_dialog.destroy).pack(pady=5)
+
+            self.log("已显示表统计信息")
+
+        except Exception as e:
+            messagebox.showerror("错误", f"获取统计信息失败: {str(e)}")
+            self.log(f"获取统计信息失败: {str(e)}")
+
     def _scan_books_thread(self):
         self.log("开始扫描书籍目录...")
         self.scan_label.config(text="扫描中...")
@@ -581,6 +740,10 @@ class EbookExtractorApp:
                     if href and href in chapter_href_to_id:
                         chapter_order_to_id[chapter_data.order] = chapter_href_to_id[href]
                 
+                # 收集整本书的所有段落和图片，一次性批量插入
+                all_paragraphs = []
+                all_images = []
+                
                 for chapter_data in chapters_data:
                     chapter_order = chapter_data.order
                     href = getattr(chapter_data, 'href', '')
@@ -590,7 +753,6 @@ class EbookExtractorApp:
                     if not chapter_id:
                         continue
 
-                    paragraphs = []
                     if hasattr(chapter_data, 'paragraphs'):
                         for para_idx, para_item in enumerate(chapter_data.paragraphs):
                             if isinstance(para_item, dict):
@@ -619,38 +781,34 @@ class EbookExtractorApp:
                                             for k, v in src_to_path.items():
                                                 if k.endswith(f"_{src_basename}") or k == src_basename:
                                                     processed_path = v
-                                                    logger.info(f"通过basename匹配: {original_src} -> {v}")
                                                     break
-                                        if not processed_path:
-                                            logger.error(f"未找到图片路径映射: chapter_order={chapter_order}, src={original_src}")
-                                            logger.error(f"可用的映射keys: {list(src_to_path.keys())[:20]}")
-                                            continue
-                                        paragraphs.append((chapter_id, processed_path, para_idx + 1, 'image', False))
+                                        if processed_path:
+                                            all_paragraphs.append((chapter_id, processed_path, para_idx + 1, 'image', False))
                                 elif para_text and para_text.strip():
-                                    paragraphs.append((chapter_id, para_text, para_idx + 1, para_type, is_footnote))
+                                    all_paragraphs.append((chapter_id, para_text, para_idx + 1, para_type, is_footnote))
                             elif isinstance(para_item, str) and para_item.strip():
-                                paragraphs.append((chapter_id, para_item, para_idx + 1, 'text', False))
-
-                    if paragraphs:
-                        self.db_manager.insert_paragraphs_batch_with_footnote(paragraphs)
-                        paragraphs_total += len(paragraphs)
+                                all_paragraphs.append((chapter_id, para_item, para_idx + 1, 'text', False))
 
                     chapter_images = images_by_chapter.get(chapter_order, [])
-                    if chapter_images:
-                        images = []
-                        for img_data in chapter_images:
-                            images.append((
-                                chapter_id,
-                                img_data.get('path', ''),
-                                img_data.get('order', 1),
-                                img_data.get('width', 0),
-                                img_data.get('height', 0),
-                                img_data.get('alt', ''),
-                                img_data.get('original_format', '')
-                            ))
-                        if images:
-                            self.db_manager.insert_images_batch(images)
-                            images_total += len(images)
+                    for img_data in chapter_images:
+                        all_images.append((
+                            chapter_id,
+                            img_data.get('path', ''),
+                            img_data.get('order', 1),
+                            img_data.get('width', 0),
+                            img_data.get('height', 0),
+                            img_data.get('alt', ''),
+                            img_data.get('original_format', '')
+                        ))
+                
+                # 一次性批量插入所有段落和图片
+                if all_paragraphs:
+                    self.db_manager.insert_paragraphs_batch_with_footnote(all_paragraphs)
+                    paragraphs_total = len(all_paragraphs)
+                
+                if all_images:
+                    self.db_manager.insert_images_batch(all_images)
+                    images_total = len(all_images)
 
                 self.db_manager.update_book_status(book_id, 'success')
                 self.success_count += 1

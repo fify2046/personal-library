@@ -88,6 +88,7 @@ def get_reading_list(db: Session = Depends(get_db)):
                 "title": book.title,
                 "author": book.author,
                 "file_type": book.file_type,
+                "cover_path": book.cover_path,
                 "add_time": item.add_time.isoformat() if item.add_time else None,
                 "last_chapter_id": last_chapter_id,
                 "last_chapter_name": last_chapter_name,

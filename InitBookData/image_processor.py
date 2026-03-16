@@ -138,6 +138,34 @@ class ImageProcessor:
             logger.error(f"保存PDF图片失败: {e}")
             return None
 
+    def save_cover_image(self, xref: int, doc, book_id: str) -> Optional[str]:
+        """保存封面图片到书籍根目录"""
+        try:
+            img_dict = doc.extract_image(xref)
+            image_data = img_dict.get('image')
+            if not image_data:
+                return None
+
+            ext = img_dict.get('ext', 'jpg')
+            if ext not in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']:
+                ext = 'jpg'
+
+            book_dir = self.get_book_image_dir(book_id)
+            filename = f"cover.{ext}"
+            filepath = os.path.join(book_dir, filename)
+
+            with open(filepath, 'wb') as f:
+                f.write(image_data)
+
+            relative_path = os.path.join(book_id, filename).replace('\\', '/')
+            logger.info(f"封面保存成功: {relative_path}")
+
+            return relative_path
+
+        except Exception as e:
+            logger.error(f"保存封面图片失败: {e}")
+            return None
+
     def check_write_permission(self, path: str) -> bool:
         try:
             test_file = os.path.join(path, '.write_test')

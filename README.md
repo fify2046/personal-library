@@ -16,16 +16,23 @@
 
 1）EPUB、PDF提取工具，PDF有点格式问题，建议只用EPUB效果最好
 
-![image-20260314215900708](./Screenshot/image-20260314215900708.png)
+![image-20260314215900708](./Screenshot/1.png)
 
 2）Web管理界面
 
-![image-20260314220302773](./Screenshot/image-20260314220302773.png)
+![image-20260314220302773](./Screenshot/2.png)
 
-![image-20260314220405948](./Screenshot/image-20260314220405948.png)
+![image-20260314220405948](./Screenshot/3.png)
 
-![image-20260314220447083](./Screenshot/image-20260314220447083.png)
+![image-20260314220447083](./Screenshot/4.png)
 
+![image-20260314220447083](./Screenshot/5.png)
+
+![image-20260314220447083](./Screenshot/6.png)
+
+![image-20260314220447083](./Screenshot/7.png)
+
+![image-20260314220447083](./Screenshot/8.png)
 
 
 ### 📑 内容提取
