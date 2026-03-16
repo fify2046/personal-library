@@ -1,10 +1,10 @@
 from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, and_
 from pydantic import BaseModel
 from db.database import get_db
-from db.models import Book, Chapter, Image
+from db.models import Book, Chapter, Image, Paragraph
 import uuid
 
 router = APIRouter(prefix="/api/books", tags=["books"])
@@ -99,6 +99,109 @@ def get_books(
         ))
 
     return BookListResponse(total=total, list=result)
+
+class SearchResultItem(BaseModel):
+    book_id: str
+    title: str
+    author: Optional[str] = None
+    cover_path: Optional[str] = None
+    file_type: str
+    matched_snippet: Optional[str] = None
+    matched_chapter_id: Optional[str] = None
+    matched_para_id: Optional[str] = None
+    chapter_name: Optional[str] = None
+
+class SearchResponse(BaseModel):
+    total: int
+    list: List[SearchResultItem]
+
+@router.get("/search", response_model=SearchResponse)
+def search_books(
+    keyword: str = Query(..., min_length=1),
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    if not keyword or not keyword.strip():
+        return SearchResponse(total=0, list=[])
+    
+    keyword_pattern = f"%{keyword.strip()}%"
+    
+    results = []
+    seen_keys = set()
+    
+    title_matches = db.query(Book).filter(
+        and_(
+            Book.extract_status == 'success',
+            or_(
+                Book.title.ilike(keyword_pattern),
+                Book.author.ilike(keyword_pattern)
+            )
+        )
+    ).all()
+    
+    for book in title_matches:
+        key = f"{book.book_id}_title"
+        if key not in seen_keys:
+            seen_keys.add(key)
+            results.append(SearchResultItem(
+                book_id=str(book.book_id),
+                title=book.title,
+                author=book.author,
+                cover_path=book.cover_path,
+                file_type=book.file_type,
+                matched_snippet=None,
+                matched_chapter_id=None,
+                matched_para_id=None,
+                chapter_name="书名/作者匹配"
+            ))
+    
+    para_matches = db.query(Paragraph).filter(
+        Paragraph.content.ilike(keyword_pattern)
+    ).join(Chapter).join(Book).filter(
+        Book.extract_status == 'success'
+    ).order_by(Paragraph.para_id).all()
+    
+    for para in para_matches:
+        chapter = db.query(Chapter).filter(Chapter.chapter_id == para.chapter_id).first()
+        if not chapter:
+            continue
+        book = db.query(Book).filter(Book.book_id == chapter.book_id).first()
+        if not book:
+            continue
+        
+        key = f"{book.book_id}_{para.para_id}"
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        
+        snippet = para.content.strip() if para.content else ""
+        if len(snippet) > 100:
+            idx = snippet.lower().find(keyword.lower())
+            if idx >= 0:
+                start = max(0, idx - 40)
+                end = min(len(snippet), idx + 60)
+                snippet = ('...' if start > 0 else '') + snippet[start:end] + ('...' if end < len(snippet) else '')
+            else:
+                snippet = snippet[:100] + '...'
+        
+        results.append(SearchResultItem(
+            book_id=str(book.book_id),
+            title=book.title,
+            author=book.author,
+            cover_path=book.cover_path,
+            file_type=book.file_type,
+            matched_snippet=snippet,
+            matched_chapter_id=str(para.chapter_id),
+            matched_para_id=str(para.para_id),
+            chapter_name=chapter.chapter_name
+        ))
+    
+    total = len(results)
+    offset = (page - 1) * size
+    paginated_results = results[offset:offset + size]
+    
+    return SearchResponse(total=total, list=paginated_results)
 
 @router.get("/{book_id}", response_model=BookDetail)
 def get_book(book_id: str, db: Session = Depends(get_db)):

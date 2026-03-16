@@ -8,14 +8,20 @@
       <div class="search-box">
         <el-input
           v-model="keyword"
-          placeholder="搜索书名/作者..."
+          placeholder="搜索书名/作者/内容..."
           clearable
           @keyup.enter="handleSearch"
+          @input="handleKeywordChange"
+          @clear="handleKeywordClear"
         >
           <template #prefix>
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
+      </div>
+      
+      <div class="search-options">
+        <el-checkbox v-model="fullTextSearch" @change="handleSearchTypeChange">全文搜索</el-checkbox>
       </div>
       
       <div class="filter-tags">
@@ -103,6 +109,10 @@
         </div>
         
         <div class="header-right">
+          <el-button @click="backToNormalList" v-if="isSearchMode">
+            <el-icon><Back /></el-icon>
+            返回列表
+          </el-button>
           <el-button @click="$router.push('/manage')">
             <el-icon><Setting /></el-icon>
             管理
@@ -115,11 +125,59 @@
             <el-icon><Clock /></el-icon>
             阅读历史
           </el-button>
-          <span class="book-count">共 {{ total }} 本书</span>
+          <span class="book-count" v-if="!isSearchMode">共 {{ total }} 本书</span>
+          <span class="book-count" v-else>搜索到 {{ searchTotal }} 条结果</span>
+        </div>
+      </div>
+      
+      <div v-if="isSearchMode" class="search-results-container">
+        <div 
+          v-for="item in searchResults" 
+          :key="item.matched_para_id ? item.matched_para_id : item.book_id + '_title'" 
+          class="search-result-item"
+          @click="goToSearchResult(item)"
+        >
+          <div class="result-cover">
+            <el-image
+              v-if="item.cover_path"
+              :src="`/api/images/${encodeURIComponent(item.cover_path)}`"
+              fit="cover"
+              class="cover-image"
+            >
+              <template #error>
+                <div class="cover-placeholder">
+                  <el-icon><Document /></el-icon>
+                </div>
+              </template>
+            </el-image>
+            <div v-else class="cover-placeholder">
+              <el-icon><Document /></el-icon>
+            </div>
+            <span class="file-type-badge">{{ item.file_type.toUpperCase() }}</span>
+          </div>
+          <div class="result-info">
+            <h3 class="result-title">{{ item.title }}</h3>
+            <p class="result-author">{{ item.author || '未知作者' }}</p>
+            <p class="result-chapter" v-if="item.chapter_name">{{ item.chapter_name }}</p>
+            <div class="result-snippet" v-if="item.matched_snippet">
+              {{ item.matched_snippet }}
+            </div>
+          </div>
+        </div>
+        
+        <div class="pagination-wrapper" v-if="searchTotal > searchPageSize">
+          <el-pagination
+            v-model:current-page="searchPage"
+            :page-size="searchPageSize"
+            :total="searchTotal"
+            layout="total, prev, pager, next"
+            @current-change="handleSearchPageChange"
+          />
         </div>
       </div>
       
       <div 
+        v-else
         class="book-container" 
         :class="[viewMode === 'grid' ? 'grid-view' : 'list-view', `cols-${columnsPerRow}`]"
         v-loading="loading"
@@ -175,12 +233,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted, inject, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { Search, Grid, List, Star, Reading, Document, Setting, Clock } from '@element-plus/icons-vue'
+import { ref, onMounted, inject, watch, computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { Search, Grid, List, Star, Reading, Document, Setting, Clock, Back } from '@element-plus/icons-vue'
 import api from '@/utils/api.js'
 
 const router = useRouter()
+const route = useRoute()
 
 const keyword = ref('')
 const fileType = ref('')
@@ -193,6 +252,14 @@ const books = ref([])
 const readingHistory = ref([])
 const columnsPerRow = ref(4)
 const viewMode = ref('grid')
+const fullTextSearch = ref(false)
+const searchResults = ref([])
+const searchPage = ref(1)
+const searchPageSize = ref(20)
+const searchTotal = ref(0)
+let searchTimeout = null
+
+const isSearchMode = computed(() => searchResults.value.length > 0 || fullTextSearch.value)
 
 const isDarkMode = inject('isDarkMode')
 const setDarkMode = inject('setDarkMode')
@@ -218,6 +285,72 @@ const fetchBooks = async () => {
 }
 
 const handleSearch = () => {
+  if (fullTextSearch.value && keyword.value.trim()) {
+    performFullTextSearch()
+  } else {
+    currentPage.value = 1
+    fetchBooks()
+  }
+}
+
+const handleKeywordChange = () => {
+  if (searchTimeout) clearTimeout(searchTimeout)
+  searchTimeout = setTimeout(() => {
+    if (fullTextSearch.value && keyword.value.trim()) {
+      performFullTextSearch()
+    } else if (!keyword.value) {
+      searchResults.value = []
+      searchTotal.value = 0
+      fetchBooks()
+    }
+  }, 500)
+}
+
+const handleKeywordClear = () => {
+  if (searchTimeout) clearTimeout(searchTimeout)
+  searchResults.value = []
+  searchTotal.value = 0
+  fetchBooks()
+}
+
+const handleSearchTypeChange = () => {
+  if (fullTextSearch.value && keyword.value.trim()) {
+    performFullTextSearch()
+  } else {
+    searchResults.value = []
+    fetchBooks()
+  }
+}
+
+const performFullTextSearch = async () => {
+  if (!keyword.value.trim()) {
+    searchResults.value = []
+    searchTotal.value = 0
+    return
+  }
+  loading.value = true
+  try {
+    const res = await api.searchBooks(keyword.value.trim(), searchPage.value, searchPageSize.value)
+    searchResults.value = res.list || []
+    searchTotal.value = res.total || 0
+  } catch (error) {
+    console.error('Failed to search books:', error)
+    searchResults.value = []
+    searchTotal.value = 0
+  } finally {
+    loading.value = false
+  }
+}
+
+const handleSearchPageChange = (page) => {
+  searchPage.value = page
+  performFullTextSearch()
+}
+
+const backToNormalList = () => {
+  fullTextSearch.value = false
+  searchResults.value = []
+  keyword.value = ''
   currentPage.value = 1
   fetchBooks()
 }
@@ -252,15 +385,21 @@ const goToDetail = (bookId) => {
   router.push(`/book/${bookId}`)
 }
 
-let searchTimeout = null
-watch([keyword], () => {
-  if (searchTimeout) clearTimeout(searchTimeout)
-  searchTimeout = setTimeout(() => {
-    if (!keyword.value) {
-      handleSearch()
-    }
-  }, 500)
-})
+const goToSearchResult = (item) => {
+  const searchParams = {
+    fromSearch: '1',
+    keyword: keyword.value,
+    page: searchPage.value
+  }
+  if (item.matched_chapter_id) {
+    router.push({
+      path: `/read/${item.book_id}/${item.matched_chapter_id}`,
+      query: { paraId: item.matched_para_id, ...searchParams }
+    })
+  } else {
+    router.push({ path: `/book/${item.book_id}`, query: searchParams })
+  }
+}
 
 onMounted(() => {
   const savedSettings = JSON.parse(localStorage.getItem('book-list-settings') || '{}')
@@ -272,7 +411,15 @@ onMounted(() => {
   if (savedSettings.currentPage) currentPage.value = savedSettings.currentPage
   if (savedSettings.pageSize) pageSize.value = savedSettings.pageSize
   
-  fetchBooks()
+  if (route.query.fromSearch === '1' && route.query.keyword) {
+    keyword.value = route.query.keyword
+    searchPage.value = parseInt(route.query.page) || 1
+    fullTextSearch.value = true
+    performFullTextSearch()
+  } else {
+    fetchBooks()
+  }
+  
   fetchReadingHistory()
 })
 
@@ -350,7 +497,11 @@ const goToReading = (item) => {
 }
 
 .search-box {
-  margin-bottom: 20px;
+  margin-bottom: 12px;
+}
+
+.search-options {
+  margin-bottom: 16px;
 }
 
 .filter-tags {
@@ -601,5 +752,94 @@ const goToReading = (item) => {
   .book-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+.search-results-container {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.search-result-item {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  background: var(--card-bg);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s;
+  border: 1px solid var(--border-color);
+}
+
+.search-result-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.result-cover {
+  flex-shrink: 0;
+  width: 100px;
+  height: 140px;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.result-cover .cover-image {
+  width: 100%;
+  height: 100%;
+}
+
+.result-cover .cover-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--hover-bg);
+  color: var(--text-secondary);
+  font-size: 32px;
+}
+
+.result-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.result-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-author {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.result-chapter {
+  font-size: 13px;
+  color: var(--primary-color);
+  margin: 4px 0;
+  font-weight: 500;
+}
+
+.result-snippet {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  padding: 8px;
+  background: var(--hover-bg);
+  border-radius: 4px;
+  margin-top: 8px;
 }
 </style>

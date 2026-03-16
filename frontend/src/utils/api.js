@@ -103,5 +103,9 @@ export default {
   
   setBookRating(bookId, rating) {
     return apiClient.put(`/books/${bookId}/rating`, { rating })
+  },
+  
+  searchBooks(keyword, page = 1, size = 20) {
+    return apiClient.get('/books/search', { params: { keyword, page, size } })
   }
 }

@@ -143,7 +143,7 @@
         <h1 class="chapter-title">{{ convertedChapterName || chapterName }}</h1>
         
         <template v-for="item in (convertedContent.length > 0 ? convertedContent : content)" :key="item.id">
-          <p v-if="item.type === 'text' && !item.is_footnote" class="paragraph" v-html="formatText(item.content)"></p>
+          <p v-if="item.type === 'text' && !item.is_footnote" class="paragraph" :data-para-id="item.id" v-html="formatText(item.content)"></p>
           <div v-else-if="item.type === 'image'" class="image-container" :class="{ 'full-width': !imageFit }">
             <el-image
               :src="getImageUrl(item.content)"
@@ -218,7 +218,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { 
   Search, Back, Minus, Plus, Document, Picture, 
@@ -475,6 +475,19 @@ const fetchChapterContent = async () => {
     const res = await api.getChapterContent(chapter.chapter_id)
     content.value = res.content
     convertContent()
+    
+    await nextTick()
+    const targetParaId = route.query.paraId
+    if (targetParaId) {
+      const targetElement = document.querySelector(`[data-para-id="${targetParaId}"]`)
+      if (targetElement) {
+        targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        targetElement.classList.add('highlight-para')
+        setTimeout(() => {
+          targetElement.classList.remove('highlight-para')
+        }, 3000)
+      }
+    }
   } catch (error) {
     console.error('Failed to fetch chapter content:', error)
     content.value = []
@@ -554,7 +567,18 @@ const handleContentMouseLeave = () => {
 }
 
 const goBack = () => {
-  router.push(`/book/${route.params.bookId}`)
+  if (route.query.fromSearch === '1') {
+    router.push({
+      path: '/',
+      query: {
+        fromSearch: '1',
+        keyword: route.query.keyword,
+        page: route.query.page
+      }
+    })
+  } else {
+    router.push(`/book/${route.params.bookId}`)
+  }
 }
 
 const increaseFontSize = () => {
@@ -888,6 +912,22 @@ watch(() => route.params.bookId, () => {
   border-radius: 4px;
   border-left: 3px solid var(--primary-color);
   text-indent: 0;
+}
+
+.highlight-para {
+  background: yellow;
+  padding: 4px 8px;
+  border-radius: 4px;
+  animation: highlight-fade 3s ease-in-out;
+}
+
+@keyframes highlight-fade {
+  0%, 100% {
+    background: yellow;
+  }
+  50% {
+    background: transparent;
+  }
 }
 
 .paragraph :deep(strong) {
