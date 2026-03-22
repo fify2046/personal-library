@@ -47,10 +47,36 @@ class EbookExtractorApp:
         # 线程数配置
         self.chapter_workers = tk.IntVar(value=8)
         self.image_workers = tk.IntVar(value=4)
-
+        
+        # 配置文件路径
+        self.config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
+        self.settings = self._load_settings()
+        
+        self.disable_index_var = tk.BooleanVar(value=self.settings.get('disable_index', True))
+        
         self._init_dirs()
         self._init_ui()
         self._init_extractors()
+
+    def _load_settings(self):
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.warning(f"加载配置失败: {e}")
+        return {'disable_index': True}
+    
+    def _save_settings(self):
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.settings, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"保存配置失败: {e}")
+
+    def _on_disable_index_changed(self):
+        self.settings['disable_index'] = self.disable_index_var.get()
+        self._save_settings()
 
     def _init_dirs(self):
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -136,6 +162,10 @@ class EbookExtractorApp:
         ttk.Button(type_frame, text="重置数据", command=self.reset_data).pack(side=tk.LEFT, padx=10)
         ttk.Button(type_frame, text="删除重复图书", command=self.delete_duplicate_books).pack(side=tk.LEFT, padx=10)
         ttk.Button(type_frame, text="数据库维护", command=self.maintain_database).pack(side=tk.LEFT, padx=10)
+        
+        self.disable_index_check = ttk.Checkbutton(type_frame, text="失效全文索引", variable=self.disable_index_var, command=self._on_disable_index_changed)
+        self.disable_index_check.pack(side=tk.LEFT, padx=10)
+        ttk.Button(type_frame, text="重建全文索引", command=self.rebuild_trgm_index).pack(side=tk.LEFT, padx=10)
 
         # 线程数配置
         workers_frame = ttk.LabelFrame(dir_frame, text="线程配置", padding="5")
@@ -225,6 +255,62 @@ class EbookExtractorApp:
             messagebox.showerror("错误", f"连接失败: {str(e)}")
             self.log(f"数据库连接错误: {str(e)}")
 
+    def _drop_trgm_index(self):
+        try:
+            if not self.db_manager:
+                return False
+            conn = self.db_manager.acquire_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("DROP INDEX IF EXISTS idx_paragraphs_content_trgm")
+                conn.commit()
+                cur.close()
+                return True
+            finally:
+                self.db_manager.release_connection(conn)
+        except Exception as e:
+            self.log(f"删除索引失败: {e}")
+            return False
+
+    def rebuild_trgm_index(self):
+        if not self.db_manager:
+            messagebox.showwarning("警告", "请先测试数据库连接")
+            return
+        
+        result = messagebox.askyesno("确认", "重建全文索引可能需要较长时间，是否继续？")
+        if result:
+            self.log("正在重建全文索引，请稍候...")
+            threading.Thread(target=self._rebuild_trgm_index_thread, daemon=True).start()
+
+    def _rebuild_trgm_index_thread(self):
+        try:
+            if not self.db_manager:
+                self.root.after(0, lambda: messagebox.showerror("错误", "数据库未连接"))
+                return
+            
+            conn = self.db_manager.acquire_connection()
+            try:
+                cur = conn.cursor()
+                
+                self.root.after(0, lambda: self.log("正在删除旧索引..."))
+                cur.execute("DROP INDEX IF EXISTS idx_paragraphs_content_trgm")
+                conn.commit()
+                
+                self.root.after(0, lambda: self.log("正在创建 paragraphs 索引..."))
+                cur.execute("""
+                    CREATE INDEX idx_paragraphs_content_trgm 
+                    ON paragraphs USING gin (content gin_trgm_ops)
+                """)
+                conn.commit()
+                
+                self.root.after(0, lambda: self.log("全文索引重建完成"))
+                self.root.after(0, lambda: messagebox.showinfo("成功", "全文索引重建完成"))
+            finally:
+                self.db_manager.release_connection(conn)
+        except Exception as e:
+            self.root.after(0, lambda: self.log(f"重建索引失败: {e}"))
+            self.root.after(0, lambda: messagebox.showerror("错误", f"重建索引失败: {e}"))
+
     def scan_books(self):
         if not self.book_dir or not os.path.exists(self.book_dir):
             messagebox.showwarning("警告", "请先选择有效的书籍目录")
@@ -273,68 +359,37 @@ class EbookExtractorApp:
                                     os.remove(item_path)
                         self.log("图片文件夹已清空")
                         
-                        cur.execute("DELETE FROM images")
-                        cur.execute("DELETE FROM paragraphs")
-                        cur.execute("DELETE FROM chapters")
-                        try:
-                            cur.execute("DELETE FROM reading_history")
-                        except:
-                            pass
-                        try:
-                            cur.execute("DELETE FROM favorites")
-                        except:
-                            pass
-                        try:
-                            cur.execute("DELETE FROM reading_list")
-                        except:
-                            pass
-                        cur.execute("DELETE FROM books")
+                        cur.execute("TRUNCATE TABLE reading_history, favorites, reading_list, images, paragraphs, chapters, books RESTART IDENTITY CASCADE")
                     elif reset_type == "PDF":
-                        cur.execute("SELECT book_id FROM books WHERE file_type = 'pdf'")
-                        book_ids_to_delete = [row[0] for row in cur.fetchall()]
+                        book_ids_query = "SELECT book_id FROM books WHERE file_type = 'pdf'"
+                        cur.execute(book_ids_query)
+                        book_ids_to_delete = [str(row[0]) for row in cur.fetchall()]
                         for book_id in book_ids_to_delete:
-                            book_img_dir = os.path.join(self.image_dir, str(book_id))
+                            book_img_dir = os.path.join(self.image_dir, book_id)
                             if os.path.exists(book_img_dir):
                                 shutil.rmtree(book_img_dir)
                         self.log("PDF图片文件夹已清空")
                         
-                        try:
-                            cur.execute("DELETE FROM reading_history WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'pdf')")
-                        except:
-                            pass
-                        try:
-                            cur.execute("DELETE FROM favorites WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'pdf')")
-                        except:
-                            pass
-                        try:
-                            cur.execute("DELETE FROM reading_list WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'pdf')")
-                        except:
-                            pass
+                        cur.execute("DELETE FROM reading_history WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'pdf')")
+                        cur.execute("DELETE FROM favorites WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'pdf')")
+                        cur.execute("DELETE FROM reading_list WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'pdf')")
                         cur.execute("DELETE FROM images WHERE chapter_id IN (SELECT chapter_id FROM chapters WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'pdf'))")
                         cur.execute("DELETE FROM paragraphs WHERE chapter_id IN (SELECT chapter_id FROM chapters WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'pdf'))")
                         cur.execute("DELETE FROM chapters WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'pdf')")
                         cur.execute("DELETE FROM books WHERE file_type = 'pdf'")
                     else:
-                        cur.execute("SELECT book_id FROM books WHERE file_type = 'epub'")
-                        book_ids_to_delete = [row[0] for row in cur.fetchall()]
+                        book_ids_query = "SELECT book_id FROM books WHERE file_type = 'epub'"
+                        cur.execute(book_ids_query)
+                        book_ids_to_delete = [str(row[0]) for row in cur.fetchall()]
                         for book_id in book_ids_to_delete:
-                            book_img_dir = os.path.join(self.image_dir, str(book_id))
+                            book_img_dir = os.path.join(self.image_dir, book_id)
                             if os.path.exists(book_img_dir):
                                 shutil.rmtree(book_img_dir)
                         self.log("EPUB图片文件夹已清空")
                         
-                        try:
-                            cur.execute("DELETE FROM reading_history WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'epub')")
-                        except:
-                            pass
-                        try:
-                            cur.execute("DELETE FROM favorites WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'epub')")
-                        except:
-                            pass
-                        try:
-                            cur.execute("DELETE FROM reading_list WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'epub')")
-                        except:
-                            pass
+                        cur.execute("DELETE FROM reading_history WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'epub')")
+                        cur.execute("DELETE FROM favorites WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'epub')")
+                        cur.execute("DELETE FROM reading_list WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'epub')")
                         cur.execute("DELETE FROM images WHERE chapter_id IN (SELECT chapter_id FROM chapters WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'epub'))")
                         cur.execute("DELETE FROM paragraphs WHERE chapter_id IN (SELECT chapter_id FROM chapters WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'epub'))")
                         cur.execute("DELETE FROM chapters WHERE book_id IN (SELECT book_id FROM books WHERE file_type = 'epub')")
@@ -625,6 +680,13 @@ class EbookExtractorApp:
         if not self.db_manager:
             messagebox.showwarning("警告", "请先测试数据库连接")
             return
+
+        if self.disable_index_var.get():
+            self.log("正在失效全文索引...")
+            if self._drop_trgm_index():
+                self.log("全文索引已失效，导入速度将提升")
+            else:
+                self.log("全文索引失效失败，继续导入")
 
         self.is_extracting = True
         self.start_button.config(state=tk.DISABLED)

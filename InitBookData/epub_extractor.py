@@ -543,7 +543,10 @@ class EPUBExtractor:
         
         # 按order排序章节
         chapters.sort(key=lambda x: x.order)
-
+        
+        # 补充处理：检查目录章节之间未被引用的内容页
+        chapters = self._supplement_unreferenced_content(book, chapters, processed_hrefs, items_by_name, progress_callback)
+        
         # 修复parent_id：创建 href -> chapter 映射，然后为所有子章节设置正确的parent_id
         # 同一href可能被多个章节使用（一级和二级都指向同一个HTML文件），需要选择层级最低的作为父章节
         href_to_chapter = {}
@@ -691,22 +694,23 @@ class EPUBExtractor:
 
             header_tags = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7']
 
+            anchor_level = int(anchor_elem.name[1]) if anchor_elem.name[1:].isdigit() and anchor_elem.name.startswith('h') else 0
+
             elements_to_extract = []
             current = anchor_elem
             while current:
                 elements_to_extract.append(current)
-
                 next_elem = current.find_next_sibling()
-
-                if next_elem and next_elem.name in header_tags:
-                    header_level = int(next_elem.name[1]) if next_elem.name[1:].isdigit() else 0
-                    anchor_level = int(anchor_elem.name[1]) if anchor_elem.name[1:].isdigit() and anchor_elem.name.startswith('h') else 0
-
-                    if header_level <= anchor_level:
-                        break
-
-                if not next_elem:
+                
+                if next_elem:
+                    if next_elem.name in header_tags:
+                        header_level = int(next_elem.name[1]) if next_elem.name[1:].isdigit() else 0
+                        if header_level <= anchor_level:
+                            break
+                    # 如果下一个元素不是标题，继续提取（处理纯正文情况）
+                else:
                     break
+                    
                 current = next_elem
 
             for elem in elements_to_extract:
@@ -716,6 +720,109 @@ class EPUBExtractor:
         except Exception as e:
             logger.debug(f"提取锚点内容失败: {e}")
             return None
+
+    def _supplement_unreferenced_content(self, book, chapters, processed_hrefs, items_by_name, progress_callback=None):
+        """补充未被目录引用的内容页到最近的目录章节"""
+        try:
+            if not book.spine or len(chapters) == 0:
+                return chapters
+            
+            spine_hrefs_ordered = []
+            for spine_idx, spine_item in enumerate(book.spine):
+                if isinstance(spine_item, tuple):
+                    item_id = spine_item[0]
+                else:
+                    item_id = str(spine_item)
+                
+                for item in book.get_items():
+                    if item.get_type() == 9 and item.get_id() == item_id:
+                        spine_hrefs_ordered.append({
+                            'idx': spine_idx,
+                            'href': item.get_name(),
+                            'item': item
+                        })
+                        break
+            
+            chapter_spine_indices = {}
+            for i, chapter in enumerate(chapters):
+                chapter_href = chapter.href.split('#')[0] if chapter.href else ''
+                for entry in spine_hrefs_ordered:
+                    if entry['href'] == chapter_href:
+                        chapter_spine_indices[i] = entry['idx']
+                        break
+            
+            unreferenced_items = []
+            for entry in spine_hrefs_ordered:
+                href = entry['href']
+                if href not in processed_hrefs:
+                    unreferenced_items.append(entry)
+            
+            if not unreferenced_items:
+                return chapters
+            
+            logger.info(f"开始补充 {len(unreferenced_items)} 个未被目录引用的内容页（使用{self.chapter_workers}线程）")
+            
+            def extract_single_page(item_entry):
+                href = item_entry['href']
+                item = item_entry['item']
+                soup = BeautifulSoup(item.get_content(), 'html.parser')
+                content_result = self._extract_content_with_images(soup, 0)
+                
+                has_meaningful_content = False
+                for para in content_result.get('paragraphs', []):
+                    if para.get('type') == 'text' and para.get('content'):
+                        text = para['content'].strip()
+                        if len(text) > 20:
+                            has_meaningful_content = True
+                            break
+                
+                if not has_meaningful_content:
+                    return None
+                
+                return {
+                    'item_idx': item_entry['idx'],
+                    'href': href,
+                    'paragraphs': content_result.get('paragraphs', []),
+                    'image_refs': content_result.get('image_refs', [])
+                }
+            
+            extracted_contents = []
+            completed = 0
+            
+            with ThreadPoolExecutor(max_workers=self.chapter_workers) as executor:
+                futures = {executor.submit(extract_single_page, item): item for item in unreferenced_items}
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result:
+                        extracted_contents.append(result)
+                    completed += 1
+                    if completed % 50 == 0:
+                        logger.info(f"提取进度: {completed}/{len(unreferenced_items)}")
+                        if progress_callback:
+                            progress_callback(completed, len(unreferenced_items))
+            
+            for content in extracted_contents:
+                item_idx = content['item_idx']
+                target_chapter_idx = None
+                max_chapter_idx = -1
+                
+                for i, chapter in enumerate(chapters):
+                    if i in chapter_spine_indices:
+                        chapter_spine_idx = chapter_spine_indices[i]
+                        if chapter_spine_idx < item_idx and chapter_spine_idx > max_chapter_idx:
+                            max_chapter_idx = chapter_spine_idx
+                            target_chapter_idx = i
+                
+                if target_chapter_idx is not None:
+                    target_chapter = chapters[target_chapter_idx]
+                    target_chapter.paragraphs.extend(content['paragraphs'])
+                    target_chapter.image_refs.extend(content['image_refs'])
+            
+            logger.info(f"补充内容完成，共处理 {len(extracted_contents)} 页")
+            return chapters
+        except Exception as e:
+            logger.error(f"补充未引用内容失败: {e}")
+            return chapters
 
     def _extract_content_with_images(self, soup, chapter_order: int) -> Dict:
         """提取章节内容，包括文本、图片、表格和脚注"""

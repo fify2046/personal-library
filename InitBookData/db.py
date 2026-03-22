@@ -51,6 +51,15 @@ class DatabaseManager:
             self._pool.closeall()
             logger.info("数据库连接池已关闭")
 
+    def acquire_connection(self):
+        if self._pool is None:
+            self.init_pool()
+        return self._pool.getconn()
+
+    def release_connection(self, conn):
+        if self._pool and conn:
+            self._pool.putconn(conn)
+
     @contextmanager
     def get_connection(self):
         conn = None

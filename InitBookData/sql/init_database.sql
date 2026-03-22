@@ -121,3 +121,14 @@ CREATE INDEX IF NOT EXISTS idx_images_order ON images(image_order);
 -- 阅读历史表索引
 CREATE INDEX IF NOT EXISTS idx_reading_history_book_id ON reading_history(book_id);
 CREATE INDEX IF NOT EXISTS idx_reading_history_read_time ON reading_history(read_time DESC);
+
+-- ============================================
+-- 8. 全文搜索支持（可选，用于提升搜索性能）
+-- ============================================
+-- 安装 pg_trgm 插件（需要超级用户权限）
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- 为 paragraphs 表添加 trigram 索引（用于全文搜索加速）
+CREATE INDEX IF NOT EXISTS idx_paragraphs_content_trgm ON paragraphs USING gin (content gin_trgm_ops);
+-- 注意：如果搜索较慢，可以执行上面的语句创建索引
+-- 注意：如果导入大量数据，建议先删除索引，导入完成后再重建索引

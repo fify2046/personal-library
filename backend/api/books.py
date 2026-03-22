@@ -115,6 +115,8 @@ class SearchResponse(BaseModel):
     total: int
     list: List[SearchResultItem]
 
+from sqlalchemy import text
+
 @router.get("/search", response_model=SearchResponse)
 def search_books(
     keyword: str = Query(..., min_length=1),
@@ -125,20 +127,36 @@ def search_books(
     if not keyword or not keyword.strip():
         return SearchResponse(total=0, list=[])
     
-    keyword_pattern = f"%{keyword.strip()}%"
+    keyword = keyword.strip().replace('；', ';')
+    keywords = [k.strip() for k in keyword.split(';') if k.strip()]
+    if not keywords:
+        return SearchResponse(total=0, list=[])
     
     results = []
     seen_keys = set()
     
-    title_matches = db.query(Book).filter(
-        and_(
-            Book.extract_status == 'success',
+    use_trgm = False
+    try:
+        result = db.execute(text("""
+            SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'
+        """))
+        use_trgm = result.fetchone() is not None
+    except:
+        pass
+    
+    keyword_patterns = [f"%{k}%" for k in keywords]
+    
+    title_conditions = []
+    for pattern in keyword_patterns:
+        title_conditions.append(
             or_(
-                Book.title.ilike(keyword_pattern),
-                Book.author.ilike(keyword_pattern)
+                Book.title.ilike(pattern),
+                Book.author.ilike(pattern)
             )
         )
-    ).all()
+    title_matches = db.query(Book).filter(
+        Book.extract_status == 'success'
+    ).filter(or_(*title_conditions)).all()
     
     for book in title_matches:
         key = f"{book.book_id}_title"
@@ -156,26 +174,57 @@ def search_books(
                 chapter_name="书名/作者匹配"
             ))
     
-    para_matches = db.query(Paragraph).filter(
-        Paragraph.content.ilike(keyword_pattern)
-    ).join(Chapter).join(Book).filter(
-        Book.extract_status == 'success'
-    ).order_by(Paragraph.para_id).all()
+    max_results = 500
+    max_per_book = 20
     
-    for para in para_matches:
-        chapter = db.query(Chapter).filter(Chapter.chapter_id == para.chapter_id).first()
-        if not chapter:
-            continue
-        book = db.query(Book).filter(Book.book_id == chapter.book_id).first()
-        if not book:
-            continue
+    if use_trgm and len(keywords) == 1:
+        keyword_str = keywords[0]
+        para_matches = db.execute(text("""
+            SELECT p.para_id, p.chapter_id, p.content, c.chapter_name, c.book_id, b.title, b.author, b.cover_path, b.file_type
+            FROM paragraphs p
+            JOIN chapters c ON p.chapter_id = c.chapter_id
+            JOIN books b ON c.book_id = b.book_id
+            WHERE b.extract_status = 'success'
+            AND p.content % :keyword
+            ORDER BY p.para_id
+        """), {"keyword": keyword_str}).fetchall()
+    else:
+        para_conditions = []
+        for pattern in keyword_patterns:
+            para_conditions.append(Paragraph.content.ilike(pattern))
+        para_query = db.query(Paragraph).join(Chapter).join(Book).filter(
+            Book.extract_status == 'success'
+        ).filter(or_(*para_conditions)).order_by(Paragraph.para_id)
         
-        key = f"{book.book_id}_{para.para_id}"
+        para_matches = []
+        for para in para_query:
+            chapter = db.query(Chapter).filter(Chapter.chapter_id == para.chapter_id).first()
+            if chapter:
+                book = db.query(Book).filter(Book.book_id == chapter.book_id).first()
+                if book:
+                    para_matches.append((para.para_id, para.chapter_id, para.content, chapter.chapter_name, chapter.book_id, book.title, book.author, book.cover_path, book.file_type))
+    
+    book_para_count = {}
+    
+    for row in para_matches:
+        if len(results) >= max_results:
+            break
+        
+        para_id, chapter_id, content, chapter_name, book_id, title, author, cover_path, file_type = row
+        
+        book_id_str = str(book_id)
+        if book_id_str not in book_para_count:
+            book_para_count[book_id_str] = 0
+        if book_para_count[book_id_str] >= max_per_book:
+            continue
+        book_para_count[book_id_str] += 1
+        
+        key = f"{book_id_str}_{para_id}"
         if key in seen_keys:
             continue
         seen_keys.add(key)
         
-        snippet = para.content.strip() if para.content else ""
+        snippet = content.strip() if content else ""
         if len(snippet) > 100:
             idx = snippet.lower().find(keyword.lower())
             if idx >= 0:
@@ -186,15 +235,15 @@ def search_books(
                 snippet = snippet[:100] + '...'
         
         results.append(SearchResultItem(
-            book_id=str(book.book_id),
-            title=book.title,
-            author=book.author,
-            cover_path=book.cover_path,
-            file_type=book.file_type,
+            book_id=str(book_id),
+            title=title,
+            author=author,
+            cover_path=cover_path,
+            file_type=file_type,
             matched_snippet=snippet,
-            matched_chapter_id=str(para.chapter_id),
-            matched_para_id=str(para.para_id),
-            chapter_name=chapter.chapter_name
+            matched_chapter_id=str(chapter_id),
+            matched_para_id=str(para_id),
+            chapter_name=chapter_name
         ))
     
     total = len(results)

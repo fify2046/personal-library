@@ -3,12 +3,22 @@
     <aside class="chapter-sidebar" :class="{ collapsed: sidebarCollapsed }">
       <div class="sidebar-header">
         <h3>{{ sidebarCollapsed ? '' : '目录' }}</h3>
-        <el-button 
-          :icon="sidebarCollapsed ? Expand : Fold" 
-          text 
-          @click="sidebarCollapsed = !sidebarCollapsed"
-          class="collapse-btn"
-        />
+        <div class="header-actions">
+          <template v-if="!sidebarCollapsed">
+            <el-tooltip content="全部展开" placement="bottom">
+              <el-button text @click="expandAllChapters" :icon="CaretBottom" />
+            </el-tooltip>
+            <el-tooltip content="全部收缩" placement="bottom">
+              <el-button text @click="collapseAllChapters" :icon="CaretRight" />
+            </el-tooltip>
+          </template>
+          <el-button 
+            :icon="sidebarCollapsed ? Expand : Fold" 
+            text 
+            @click="sidebarCollapsed = !sidebarCollapsed"
+            class="collapse-btn"
+          />
+        </div>
       </div>
       
       <div class="chapter-search" v-if="!sidebarCollapsed">
@@ -222,7 +232,7 @@ import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from '
 import { useRouter, useRoute } from 'vue-router'
 import { 
   Search, Back, Minus, Plus, Document, Picture, 
-  ArrowLeft, ArrowRight, Top, Expand, Fold 
+  ArrowLeft, ArrowRight, Top, Expand, Fold, CaretRight, CaretBottom
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/utils/api.js'
@@ -457,6 +467,7 @@ const fetchChapters = async () => {
     
     await fetchChapterContent()
     await saveReadingProgress()
+    expandChapterToCurrent(flatChapters.value[currentChapterIndex.value]?.chapter_id)
   } catch (error) {
     console.error('Failed to fetch chapters:', error)
   }
@@ -512,12 +523,55 @@ const toggleChapterExpand = (chapter) => {
   chapter.expanded = !chapter.expanded
 }
 
+const expandAllChapters = () => {
+  const setExpanded = (chapterList, expanded) => {
+    chapterList.forEach(chapter => {
+      if (chapter.children && chapter.children.length > 0) {
+        chapter.expanded = expanded
+        setExpanded(chapter.children, expanded)
+      }
+    })
+  }
+  setExpanded(chapters.value, true)
+}
+
+const collapseAllChapters = () => {
+  const setExpanded = (chapterList, expanded) => {
+    chapterList.forEach(chapter => {
+      if (chapter.children && chapter.children.length > 0) {
+        chapter.expanded = expanded
+        setExpanded(chapter.children, expanded)
+      }
+    })
+  }
+  setExpanded(chapters.value, false)
+}
+
+const expandChapterToCurrent = (chapterId) => {
+  const findAndExpand = (chapterList) => {
+    for (const chapter of chapterList) {
+      if (chapter.chapter_id === chapterId) {
+        return true
+      }
+      if (chapter.children && chapter.children.length > 0) {
+        if (findAndExpand(chapter.children)) {
+          chapter.expanded = true
+          return true
+        }
+      }
+    }
+    return false
+  }
+  findAndExpand(chapters.value)
+}
+
 const goToChapter = (chapter) => {
   const idx = flatChapters.value.findIndex(c => c.chapter_id === chapter.chapter_id)
   if (idx !== -1) {
     currentChapterIndex.value = idx
     fetchChapterContent()
     saveReadingProgress()
+    expandChapterToCurrent(chapter.chapter_id)
     scrollToTop()
   }
 }
@@ -527,6 +581,7 @@ const prevChapter = () => {
     currentChapterIndex.value--
     fetchChapterContent()
     saveReadingProgress()
+    expandChapterToCurrent(flatChapters.value[currentChapterIndex.value]?.chapter_id)
     scrollToTop()
   }
 }
@@ -536,6 +591,7 @@ const nextChapter = () => {
     currentChapterIndex.value++
     fetchChapterContent()
     saveReadingProgress()
+    expandChapterToCurrent(flatChapters.value[currentChapterIndex.value]?.chapter_id)
     scrollToTop()
   }
 }
@@ -723,6 +779,12 @@ watch(() => route.params.bookId, () => {
   margin: 0;
   font-size: 18px;
   color: var(--text-primary);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .collapse-btn {
