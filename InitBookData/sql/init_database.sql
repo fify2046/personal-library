@@ -95,6 +95,19 @@ CREATE TABLE IF NOT EXISTS reading_list (
 );
 
 -- ============================================
+-- 8. AI摘要表（AI辅助阅读功能）
+-- ============================================
+CREATE TABLE IF NOT EXISTS book_chapter_summary (
+    summary_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chapter_id UUID NOT NULL REFERENCES chapters(chapter_id) ON DELETE CASCADE,
+    summary_content TEXT NOT NULL,
+    model_name VARCHAR(100),
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_chapter_summary UNIQUE (chapter_id)
+);
+
+-- ============================================
 -- 创建索引以提高查询性能
 -- ============================================
 
@@ -121,6 +134,10 @@ CREATE INDEX IF NOT EXISTS idx_images_order ON images(image_order);
 -- 阅读历史表索引
 CREATE INDEX IF NOT EXISTS idx_reading_history_book_id ON reading_history(book_id);
 CREATE INDEX IF NOT EXISTS idx_reading_history_read_time ON reading_history(read_time DESC);
+
+-- AI摘要表索引
+CREATE INDEX IF NOT EXISTS idx_chapter_summary_chapter_id ON book_chapter_summary(chapter_id);
+CREATE INDEX IF NOT EXISTS idx_chapter_summary_create_time ON book_chapter_summary(create_time DESC);
 
 -- ============================================
 -- 8. 全文搜索支持（可选，用于提升搜索性能）

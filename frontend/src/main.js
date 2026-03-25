@@ -9,6 +9,7 @@ import BookDetail from './pages/BookDetail.vue'
 import ReadingList from './pages/ReadingList.vue'
 import Manage from './pages/Manage.vue'
 import History from './pages/History.vue'
+import SystemConfig from './pages/SystemConfig.vue'
 
 const routes = [
   { path: '/', name: 'BookList', component: BookList },
@@ -16,7 +17,8 @@ const routes = [
   { path: '/read/:bookId/:chapterId?', name: 'Reader', component: Reader },
   { path: '/reading', name: 'ReadingList', component: ReadingList },
   { path: '/manage', name: 'Manage', component: Manage },
-  { path: '/history', name: 'History', component: History }
+  { path: '/history', name: 'History', component: History },
+  { path: '/system-config', name: 'SystemConfig', component: SystemConfig }
 ]
 
 const router = createRouter({

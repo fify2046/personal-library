@@ -1,0 +1,120 @@
+{
+  "ai_enabled": false,
+  "default_model": "gpt-3.5-turbo",
+  "min_content_length": 300,
+  "models": [
+    {
+      "name": "gpt-3.5-turbo",
+      "platform": "OpenAI",
+      "api_protocol": "openai-completions",
+      "api_key": "your-openai-api-key",
+      "base_url": "https://api.openai.com/v1/chat/completions",
+      "parameters": {
+        "temperature": 0.7,
+        "max_tokens": 1000,
+        "timeout": 120
+      }
+    },
+    {
+      "name": "claude-3-5-sonnet",
+      "platform": "Anthropic",
+      "api_protocol": "anthropic-messages",
+      "api_key": "your-anthropic-api-key",
+      "base_url": "https://api.anthropic.com/v1/messages",
+      "parameters": {
+        "temperature": 0.7,
+        "max_tokens": 1000,
+        "timeout": 180
+      }
+    },
+    {
+      "name": "MiniMax-M2.5",
+      "platform": "MiniMax",
+      "api_protocol": "anthropic-messages",
+      "api_key": "your-minimax-api-key",
+      "base_url": "https://api.minimaxi.com/anthropic",
+      "parameters": {
+        "temperature": 0.7,
+        "max_tokens": 1000,
+        "timeout": 180
+      }
+    },
+    {
+      "name": "glm-4",
+      "platform": "GLM",
+      "api_protocol": "openai-completions",
+      "api_key": "your-glm-api-key",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+      "parameters": {
+        "temperature": 0.7,
+        "max_tokens": 1000,
+        "timeout": 120
+      }
+    },
+    {
+      "name": "doubao-pro",
+      "platform": "Doubao",
+      "api_protocol": "openai-completions",
+      "api_key": "your-doubao-api-key",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+      "parameters": {
+        "temperature": 0.7,
+        "max_tokens": 1000,
+        "timeout": 120
+      }
+    },
+    {
+      "name": "deepseek-chat",
+      "platform": "Deepseek",
+      "api_protocol": "openai-completions",
+      "api_key": "your-deepseek-api-key",
+      "base_url": "https://api.deepseek.com/v1/chat/completions",
+      "parameters": {
+        "temperature": 0.7,
+        "max_tokens": 1000,
+        "timeout": 120
+      }
+    },
+    {
+      "name": "gemini-pro",
+      "platform": "Google AI",
+      "api_protocol": "openai-completions",
+      "api_key": "your-google-api-key",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "parameters": {
+        "temperature": 0.7,
+        "max_tokens": 1000,
+        "timeout": 120
+      }
+    },
+    {
+      "name": "ollama-local",
+      "platform": "Ollama",
+      "api_protocol": "openai-completions",
+      "api_key": "",
+      "base_url": "http://localhost:11434/v1/chat/completions",
+      "local_model_path": "llama3",
+      "parameters": {
+        "temperature": 0.7,
+        "max_tokens": 1000,
+        "timeout": 180
+      }
+    },
+    {
+      "name": "lm-studio",
+      "platform": "LM Studio",
+      "api_protocol": "openai-completions",
+      "api_key": "lm-studio",
+      "base_url": "http://localhost:1234/v1/chat/completions",
+      "local_model_path": "local-model-name",
+      "parameters": {
+        "temperature": 0.7,
+        "max_tokens": 1000,
+        "timeout": 300
+      }
+    }
+  ],
+  "prompts": {
+    "summary": "请根据以下{chapter_name}内容生成摘要，注意尽量保留原文重点但又不啰嗦，字数控制在原文规模5分之1到3分之1，但最多不要超1000字：\n{content}"
+  }
+}

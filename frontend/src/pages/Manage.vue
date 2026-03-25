@@ -28,6 +28,10 @@
           <el-icon><Setting /></el-icon>
           <span>图书管理</span>
         </div>
+        <div class="menu-item" @click="$router.push('/system-config')">
+          <el-icon><Tools /></el-icon>
+          <span>系统管理</span>
+        </div>
       </div>
     </aside>
     
@@ -147,7 +151,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Back, Star, Reading, Setting, HomeFilled, Expand, Fold, Clock } from '@element-plus/icons-vue'
+import { Search, Back, Star, Reading, Setting, HomeFilled, Expand, Fold, Clock, Tools } from '@element-plus/icons-vue'
 import api from '@/utils/api.js'
 
 const router = useRouter()

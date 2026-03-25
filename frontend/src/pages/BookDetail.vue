@@ -77,16 +77,16 @@
           </div>
           
           <div class="action-buttons-row">
-            <el-button 
-              type="primary" 
-              size="large" 
+            <el-button
+              type="primary"
+              size="large"
               class="start-reading-btn"
               @click="startReading"
             >
               {{ hasReadingProgress ? '继续阅读' : '开始阅读' }}
             </el-button>
-            
-            <el-button 
+
+            <el-button
               :type="inReadingList ? 'info' : 'default'"
               size="large"
               @click="toggleReadingList"
@@ -94,10 +94,58 @@
               <el-icon><Reading /></el-icon>
               {{ inReadingList ? '已加入阅读列表' : '添加到阅读列表' }}
             </el-button>
+
+            <el-button
+              v-if="aiEnabled"
+              type="success"
+              size="large"
+              @click="showAISummaryDialog"
+            >
+              <el-icon><MagicStick /></el-icon>
+              AI辅助阅读
+            </el-button>
           </div>
         </div>
       </div>
     </div>
+
+    <el-dialog v-model="aiSummaryDialogVisible" title="AI辅助阅读 - 选择章节生成摘要" width="700px">
+      <el-alert
+        title="操作说明"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 20px;"
+      >
+        勾选需要生成AI摘要的章节，然后点击"生成AI摘要"按钮。已生成摘要的章节会显示绿色标记。
+      </el-alert>
+
+      <div style="max-height: 400px; overflow-y: auto;">
+        <el-tree
+          :data="chapterTreeData"
+          :props="{ label: 'label', children: 'children' }"
+          node-key="id"
+          show-checkbox
+          default-expand-all
+          ref="chapterTreeRef"
+        >
+          <template #default="{ node, data }">
+            <span class="chapter-tree-node">
+              <span>{{ node.label }}</span>
+              <el-tag v-if="data.hasSummary" type="success" size="small" style="margin-left: 8px;">已生成</el-tag>
+            </span>
+          </template>
+        </el-tree>
+      </div>
+
+      <template #footer>
+        <el-button @click="aiSummaryDialogVisible = false">取消</el-button>
+        <el-button @click="selectAllChapters">全选</el-button>
+        <el-button @click="deselectAllChapters">取消全选</el-button>
+        <el-button type="primary" @click="generateAISummary" :loading="generatingSummary">
+          生成AI摘要
+        </el-button>
+      </template>
+    </el-dialog>
     
     <el-dialog v-model="editDialogVisible" title="修改图书信息" width="500px">
       <el-form :model="editForm" label-width="80px">
@@ -126,9 +174,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ArrowLeft, Reading, Edit } from '@element-plus/icons-vue'
+import { ArrowLeft, Reading, Edit, MagicStick } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/utils/api.js'
 
@@ -143,6 +191,12 @@ const hasReadingProgress = ref(false)
 const lastChapterId = ref(null)
 const bookRating = ref(0)
 const editDialogVisible = ref(false)
+const aiEnabled = ref(false)
+const aiSummaryDialogVisible = ref(false)
+const generatingSummary = ref(false)
+const chapterTreeRef = ref(null)
+const chapterSummaries = ref({})
+const aiTimeout = ref(120000)
 const editForm = ref({
   title: '',
   author: '',
@@ -266,8 +320,98 @@ const toggleReadingList = async () => {
   }
 }
 
+const checkAIStatus = async () => {
+  try {
+    const status = await api.getAIStatus()
+    aiEnabled.value = status.ai_enabled
+    aiTimeout.value = status.timeout || 120000
+  } catch (error) {
+    aiEnabled.value = false
+  }
+}
+
+const showAISummaryDialog = async () => {
+  aiSummaryDialogVisible.value = true
+  await loadChapterSummaries()
+}
+
+const loadChapterSummaries = async () => {
+  try {
+    for (const chapter of chapters.value) {
+      try {
+        const summary = await api.getChapterSummary(chapter.chapter_id)
+        chapterSummaries.value[chapter.chapter_id] = summary
+      } catch (error) {
+        chapterSummaries.value[chapter.chapter_id] = null
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load chapter summaries:', error)
+  }
+}
+
+const chapterTreeData = computed(() => {
+  const buildTree = (parentId = null) => {
+    return chapters.value
+      .filter(ch => ch.parent_id === parentId)
+      .map(ch => {
+        const children = buildTree(ch.chapter_id)
+        return {
+          id: ch.chapter_id,
+          label: ch.chapter_name || `第${ch.chapter_order}章`,
+          hasSummary: !!chapterSummaries.value[ch.chapter_id],
+          children: children.length > 0 ? children : null
+        }
+      })
+  }
+  return buildTree()
+})
+
+const selectAllChapters = () => {
+  if (chapterTreeRef.value) {
+    const allIds = chapters.value.map(ch => ch.chapter_id)
+    chapterTreeRef.value.setCheckedKeys(allIds)
+  }
+}
+
+const deselectAllChapters = () => {
+  if (chapterTreeRef.value) {
+    chapterTreeRef.value.setCheckedKeys([])
+  }
+}
+
+const generateAISummary = async () => {
+  if (!chapterTreeRef.value) return
+
+  const checkedNodes = chapterTreeRef.value.getCheckedNodes()
+  const chapterIds = checkedNodes.map(node => node.id)
+
+  if (chapterIds.length === 0) {
+    ElMessage.warning('请至少选择一个章节')
+    return
+  }
+
+  try {
+    generatingSummary.value = true
+    const result = await api.generateSummary(chapterIds, null, aiTimeout.value)
+
+    if (result.success) {
+      ElMessage.success(result.message)
+      await loadChapterSummaries()
+    } else {
+      ElMessage.warning(result.message)
+    }
+  } catch (error) {
+    ElMessage.error('生成摘要失败')
+    console.error(error)
+  } finally {
+    generatingSummary.value = false
+  }
+}
+
 onMounted(() => {
   fetchBookDetail()
+  checkAIStatus()
 })
 </script>
 
@@ -409,5 +553,12 @@ onMounted(() => {
   margin-left: 8px;
   color: var(--text-secondary);
   font-size: 14px;
+}
+
+.chapter-tree-node {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
 }
 </style>

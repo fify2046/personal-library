@@ -107,5 +107,56 @@ export default {
   
   searchBooks(keyword, page = 1, size = 20) {
     return apiClient.get('/books/search', { params: { keyword, page, size } })
+  },
+
+  getSystemConfig() {
+    return apiClient.get('/config')
+  },
+
+  updateAIModel(data) {
+    return apiClient.post('/config/models', data)
+  },
+
+  deleteAIModel(modelName) {
+    return apiClient.delete(`/config/models/${modelName}`)
+  },
+
+  setAIModelEnabled(enabled) {
+    return apiClient.put('/config/ai-enabled', null, { params: { enabled } })
+  },
+
+  setDefaultModel(modelName) {
+    return apiClient.put('/config/default-model', null, { params: { model_name: modelName } })
+  },
+
+  updatePrompt(data) {
+    return apiClient.put('/config/prompts', data)
+  },
+
+  getMinContentLength() {
+    return apiClient.get('/config/min-content-length')
+  },
+
+  setMinContentLength(length) {
+    return apiClient.put('/config/min-content-length', null, { params: { length } })
+  },
+
+  getAIStatus() {
+    return apiClient.get('/ai/status')
+  },
+
+  getChapterSummary(chapterId) {
+    return apiClient.get(`/ai/summary/${chapterId}`)
+  },
+
+  generateSummary(chapterIds, modelName = null, timeout = 600000) {
+    return apiClient.post('/ai/summary/generate',
+      { chapter_ids: chapterIds, model_name: modelName },
+      { timeout }
+    )
+  },
+
+  deleteSummary(chapterId) {
+    return apiClient.delete(`/ai/summary/${chapterId}`)
   }
 }

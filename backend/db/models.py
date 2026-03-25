@@ -38,6 +38,7 @@ class Chapter(Base):
     book = relationship("Book", back_populates="chapters")
     paragraphs = relationship("Paragraph", back_populates="chapter", cascade="all, delete-orphan")
     images = relationship("Image", back_populates="chapter", cascade="all, delete-orphan")
+    summary = relationship("BookChapterSummary", back_populates="chapter", uselist=False, cascade="all, delete-orphan")
 
 class Paragraph(Base):
     __tablename__ = "paragraphs"
@@ -87,8 +88,20 @@ class Favorite(Base):
 
 class ReadingList(Base):
     __tablename__ = "reading_list"
-    
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     book_id = Column(UUID(as_uuid=True), ForeignKey("books.book_id", ondelete="CASCADE"), nullable=False)
     add_time = Column(DateTime, default=lambda: datetime.now())
+
+class BookChapterSummary(Base):
+    __tablename__ = "book_chapter_summary"
+
+    summary_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    chapter_id = Column(UUID(as_uuid=True), ForeignKey("chapters.chapter_id", ondelete="CASCADE"), nullable=False)
+    summary_content = Column(Text, nullable=False)
+    model_name = Column(String(100))
+    create_time = Column(DateTime, default=lambda: datetime.now())
+    update_time = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now())
+
+    chapter = relationship("Chapter", back_populates="summary")
 

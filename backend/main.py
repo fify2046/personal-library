@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api import books, chapters, images, reading, favorites, reading_list
+from api import books, chapters, images, reading, favorites, reading_list, system_config, ai_summary
 from db.config import config
 
 app = FastAPI(
@@ -24,6 +24,8 @@ app.include_router(images.router)
 app.include_router(reading.router)
 app.include_router(favorites.router)
 app.include_router(reading_list.router)
+app.include_router(system_config.router)
+app.include_router(ai_summary.router)
 
 @app.get("/")
 def root():

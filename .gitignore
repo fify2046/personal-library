@@ -31,6 +31,9 @@ ENV/
 .env.local
 .env.*.local
 
+# System Configuration (包含敏感信息)
+backend/config/system_config.json
+
 # IDE
 .vscode/
 .idea/

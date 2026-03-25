@@ -124,8 +124,44 @@
           />
           
           <el-button :icon="Picture" circle @click="toggleImageFit" :class="{ active: imageFit }" title="图片自适应" />
+
+          <el-button
+            v-if="aiEnabled"
+            type="primary"
+            @click="toggleAISummary"
+            :class="{ active: showAISummary }"
+            title="AI摘要"
+          >
+            <el-icon><MagicStick /></el-icon>
+            AI摘要
+          </el-button>
         </div>
       </header>
+
+      <aside class="ai-summary-panel" v-if="showAISummary && aiEnabled">
+        <div class="ai-summary-header">
+          <h3>AI摘要</h3>
+          <el-button text @click="showAISummary = false">
+            <el-icon><Close /></el-icon>
+          </el-button>
+        </div>
+        <div class="ai-summary-content" v-loading="aiSummaryLoading">
+          <div v-if="aiSummaryContent" class="summary-text">
+            <div style="margin-bottom: 12px; text-align: center;">
+              <el-button size="small" type="warning" @click="generateAISummary">
+                重新生成
+              </el-button>
+            </div>
+            <div class="markdown-body" v-html="renderedSummary"></div>
+          </div>
+          <div v-else-if="!aiSummaryLoading" class="no-summary">
+            <p>暂无AI摘要</p>
+            <el-button size="small" type="primary" @click="generateAISummary">
+              生成AI摘要
+            </el-button>
+          </div>
+        </div>
+      </aside>
       
       <div class="reading-progress" v-if="flatChapters.length > 0">
         <div class="progress-bar">
@@ -134,8 +170,9 @@
         <span class="progress-text">{{ currentChapterIndex + 1 }} / {{ flatChapters.length }}</span>
       </div>
       
-      <div 
-        class="content-area" 
+      <div
+        class="content-area"
+        :class="{ 'with-summary': showAISummary && aiEnabled }"
         :style="{ fontSize: fontSize + 'px', lineHeight: lineHeight }"
         ref="contentRef"
         @mousemove="handleContentMouseMove"
@@ -230,13 +267,14 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { 
-  Search, Back, Minus, Plus, Document, Picture, 
-  ArrowLeft, ArrowRight, Top, Expand, Fold, CaretRight, CaretBottom
+import {
+  Search, Back, Minus, Plus, Document, Picture,
+  ArrowLeft, ArrowRight, Top, Expand, Fold, CaretRight, CaretBottom, MagicStick, Close
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/utils/api.js'
 import * as OpenCC from 'opencc-js'
+import { marked } from 'marked'
 
 const router = useRouter()
 const route = useRoute()
@@ -278,6 +316,17 @@ const imageFit = ref(true)
 const isTraditional = ref(false)
 const showLeftArrow = ref(false)
 const showRightArrow = ref(false)
+
+const aiEnabled = ref(false)
+const showAISummary = ref(false)
+const aiSummaryContent = ref('')
+const aiSummaryLoading = ref(false)
+const aiTimeout = ref(120000)
+
+const renderedSummary = computed(() => {
+  if (!aiSummaryContent.value) return ''
+  return marked(aiSummaryContent.value)
+})
 
 const fontSize = inject('fontSize')
 const lineHeight = inject('lineHeight')
@@ -475,18 +524,18 @@ const fetchChapters = async () => {
 
 const fetchChapterContent = async () => {
   if (flatChapters.value.length === 0) return
-  
+
   const chapter = flatChapters.value[currentChapterIndex.value]
   if (!chapter) return
-  
+
   currentChapterId.value = chapter.chapter_id
   chapterName.value = chapter.chapter_name
-  
+
   try {
     const res = await api.getChapterContent(chapter.chapter_id)
     content.value = res.content
     convertContent()
-    
+
     await nextTick()
     const targetParaId = route.query.paraId
     if (targetParaId) {
@@ -499,9 +548,64 @@ const fetchChapterContent = async () => {
         }, 3000)
       }
     }
+
+    if (showAISummary.value && aiEnabled.value) {
+      await loadAISummary()
+    }
   } catch (error) {
     console.error('Failed to fetch chapter content:', error)
     content.value = []
+  }
+}
+
+const checkAIStatus = async () => {
+  try {
+    const status = await api.getAIStatus()
+    aiEnabled.value = status.ai_enabled
+    aiTimeout.value = status.timeout || 120000
+  } catch (error) {
+    aiEnabled.value = false
+  }
+}
+
+const toggleAISummary = () => {
+  showAISummary.value = !showAISummary.value
+  if (showAISummary.value && aiEnabled.value && !aiSummaryContent.value) {
+    loadAISummary()
+  }
+}
+
+const loadAISummary = async () => {
+  if (!currentChapterId.value) return
+
+  try {
+    aiSummaryLoading.value = true
+    const summary = await api.getChapterSummary(currentChapterId.value)
+    aiSummaryContent.value = summary.summary_content
+  } catch (error) {
+    aiSummaryContent.value = ''
+  } finally {
+    aiSummaryLoading.value = false
+  }
+}
+
+const generateAISummary = async () => {
+  if (!currentChapterId.value) return
+
+  try {
+    aiSummaryLoading.value = true
+    const result = await api.generateSummary([currentChapterId.value], null, aiTimeout.value)
+    if (result.success) {
+      ElMessage.success('AI摘要生成成功')
+      await loadAISummary()
+    } else {
+      ElMessage.warning(result.message)
+    }
+  } catch (error) {
+    ElMessage.error('生成AI摘要失败')
+    console.error(error)
+  } finally {
+    aiSummaryLoading.value = false
   }
 }
 
@@ -722,8 +826,9 @@ onMounted(() => {
   fetchBookInfo()
   fetchChapters()
   loadDisplayMode()
+  checkAIStatus()
   window.addEventListener('keydown', handleKeydown)
-  
+
   setTimeout(() => {
     if (contentRef.value) {
       const rect = contentRef.value.getBoundingClientRect()
@@ -1137,6 +1242,162 @@ watch(() => route.params.bookId, () => {
 
 .side-arrow.visible {
   opacity: 1;
+}
+
+.ai-summary-panel {
+  position: fixed;
+  right: 0;
+  top: 60px;
+  bottom: 0;
+  width: 350px;
+  background: var(--card-bg);
+  box-shadow: -2px 0 12px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+}
+
+.ai-summary-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ai-summary-header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.ai-summary-content {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.summary-text {
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--text-primary);
+}
+
+.markdown-body {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-primary);
+}
+
+.markdown-body h1 {
+  font-size: 20px;
+  margin: 16px 0 12px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 8px;
+}
+
+.markdown-body h2 {
+  font-size: 18px;
+  margin: 14px 0 10px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 6px;
+}
+
+.markdown-body h3 {
+  font-size: 16px;
+  margin: 12px 0 8px;
+}
+
+.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  font-size: 15px;
+  margin: 10px 0 6px;
+}
+
+.markdown-body p {
+  margin: 8px 0;
+}
+
+.markdown-body ul, .markdown-body ol {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.markdown-body li {
+  margin: 4px 0;
+}
+
+.markdown-body strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.markdown-body em {
+  font-style: italic;
+}
+
+.markdown-body code {
+  background: var(--hover-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: Consolas, Monaco, 'Courier New', monospace;
+  font-size: 13px;
+}
+
+.markdown-body pre {
+  background: var(--hover-bg);
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+}
+
+.markdown-body blockquote {
+  border-left: 4px solid var(--primary-color);
+  margin: 12px 0;
+  padding: 8px 16px;
+  background: var(--hover-bg);
+  border-radius: 0 8px 8px 0;
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  width: 100%;
+}
+
+.markdown-body th, .markdown-body td {
+  border: 1px solid var(--border-color);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.markdown-body th {
+  background: var(--hover-bg);
+  font-weight: 600;
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 16px 0;
+}
+
+.no-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 16px;
+  color: var(--text-secondary);
+}
+
+.content-area.with-summary {
+  margin-right: 350px;
 }
 
 @media (max-width: 1200px) {
