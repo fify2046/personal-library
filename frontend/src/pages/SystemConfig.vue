@@ -199,6 +199,15 @@
                 placeholder="例如: llama3"
               />
             </el-form-item>
+            <el-form-item label="限速设置">
+              <el-input-number
+                v-model="selectedModelRateLimit"
+                :min="1"
+                :max="10"
+                :step="1"
+              />
+              <span style="margin-left: 10px; color: #999;">次/秒</span>
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="saveModelParams">保存参数</el-button>
             </el-form-item>
@@ -209,24 +218,36 @@
         <el-card class="config-card">
           <template #header>
             <div class="card-header">
-              <span>AI提示词配置</span>
+              <span>AI提示词模板</span>
+              <el-button type="primary" size="small" @click="showAddTemplateDialog = true">
+                添加模板
+              </el-button>
             </div>
           </template>
-          <el-form label-width="150px">
-            <el-form-item label="摘要生成提示词">
-              <el-input
-                v-model="summaryPrompt"
-                type="textarea"
-                :rows="6"
-                placeholder="请输入摘要生成提示词模板，使用 {chapter_name} 和 {content} 作为占位符"
-              />
-            </el-form-item>
-            <el-form-item>
-              <el-button type="primary" @click="savePrompt">保存提示词</el-button>
-            </el-form-item>
-          </el-form>
+
+          <el-table :data="promptTemplates" style="width: 100%" v-if="promptTemplates.length > 0">
+            <el-table-column prop="name" label="模板名称" width="150" />
+            <el-table-column prop="description" label="描述" width="200" />
+            <el-table-column prop="model_name" label="关联模型" width="150">
+              <template #default="scope">
+                <span>{{ scope.row.model_name || '使用默认模型' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="200">
+              <template #default="scope">
+                <el-button size="small" @click="editTemplate(scope.row)">
+                  编辑
+                </el-button>
+                <el-button size="small" type="danger" @click="handleDeleteTemplate(scope.row.name)">
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-else description="暂无提示词模板" />
+
           <el-alert
-            title="提示词模板说明"
+            title="模板说明"
             type="info"
             :closable="false"
             style="margin-top: 20px;"
@@ -238,10 +259,12 @@
                   <li><strong>{chapter_name}</strong> - 章节名称</li>
                   <li><strong>{content}</strong> - 章节内容</li>
                 </ul>
-                <p>示例：</p>
-                <code style="display: block; background: #f5f5f5; padding: 10px; margin-top: 5px;">
-请根据以下"{chapter_name}"内容生成50字左右的摘要：\n\n{content}
-                </code>
+                <p>您可以定义多个模板，每个模板可以配置不同的提示词和关联模型。例如：</p>
+                <ul style="margin: 10px 0;">
+                  <li>小说摘要模板 - 用于生成小说章节摘要</li>
+                  <li>学习内容摘要模板 - 用于生成学习类图书章节内容</li>
+                </ul>
+                <p>模板选择后会自动保存到本地参数，后续调用时直接使用。</p>
               </div>
             </template>
           </el-alert>
@@ -313,6 +336,49 @@
         <el-button type="primary" @click="handleAddModel">添加</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="showAddTemplateDialog" :title="editingTemplate ? '编辑提示词模板' : '添加提示词模板'" width="700px">
+      <el-form :model="templateForm" label-width="120px">
+        <el-form-item label="模板名称" required>
+          <el-input v-model="templateForm.name" placeholder="例如: 小说摘要" :disabled="!!editingTemplate" />
+        </el-form-item>
+        <el-form-item label="模板描述">
+          <el-input v-model="templateForm.description" placeholder="例如: 用于生成小说章节摘要" />
+        </el-form-item>
+        <el-form-item label="关联模型">
+          <el-select v-model="templateForm.model_name" placeholder="留空则使用默认模型" clearable>
+            <el-option
+              v-for="model in models"
+              :key="model.name"
+              :label="model.name"
+              :value="model.name"
+            />
+          </el-select>
+          <span style="margin-left: 10px; color: #999; font-size: 12px;">留空使用默认模型</span>
+        </el-form-item>
+        <el-form-item label="提示词模板" required>
+          <el-input
+            v-model="templateForm.prompt_template"
+            type="textarea"
+            :rows="6"
+            placeholder="请输入提示词模板，使用 {chapter_name} 和 {content} 作为占位符"
+          />
+          <div class="template-hints">
+             <span class="hint-label">可用占位符（点击复制）：</span>
+             <div class="hint-items">
+               <el-tag class="hint-tag" @click="copyToClipboard('{chapter_name}')" style="cursor: pointer;">{chapter_name}</el-tag>
+               <span class="hint-desc">- 章节名称</span>
+               <el-tag class="hint-tag" @click="copyToClipboard('{content}')" style="cursor: pointer; margin-left: 12px;">{content}</el-tag>
+               <span class="hint-desc">- 章节内容</span>
+             </div>
+           </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="closeTemplateDialog">取消</el-button>
+        <el-button type="primary" @click="handleSaveTemplate">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -342,6 +408,7 @@ const selectedModelLocalPath = ref('')
 const selectedModelPlatform = ref('')
 const selectedModelApiProtocol = ref('openai')
 const selectedModelApiKey = ref('')
+const selectedModelRateLimit = ref(1)
 
 const isSelectedModelLocal = computed(() => {
   return ['Ollama', 'LM Studio'].includes(selectedModelPlatform.value)
@@ -350,6 +417,15 @@ const isSelectedModelLocal = computed(() => {
 const summaryPrompt = ref('')
 const minContentLength = ref(300)
 const showAddModelDialog = ref(false)
+const promptTemplates = ref([])
+const showAddTemplateDialog = ref(false)
+const editingTemplate = ref(null)
+const templateForm = ref({
+  name: '',
+  description: '',
+  model_name: null,
+  prompt_template: ''
+})
 const newModel = ref({
   name: '',
   platform: 'OpenAI',
@@ -398,6 +474,7 @@ const loadConfig = async () => {
     models.value = config.models || []
     defaultModel.value = config.default_model || ''
     summaryPrompt.value = config.prompts?.summary || ''
+    promptTemplates.value = config.prompt_templates || []
 
     const minLength = await api.getMinContentLength()
     minContentLength.value = minLength.min_content_length || 300
@@ -422,6 +499,7 @@ const loadModelParams = () => {
     selectedModelApiKey.value = model.api_key || ''
     selectedModelBaseUrl.value = model.base_url || ''
     selectedModelLocalPath.value = model.local_model_path || ''
+    selectedModelRateLimit.value = model.rate_limit || 1
 
     if (model.parameters) {
       selectedModelParams.value = {
@@ -480,6 +558,7 @@ const saveModelParams = async () => {
       model.base_url = selectedModelBaseUrl.value
       model.local_model_path = selectedModelLocalPath.value
       model.parameters = selectedModelParams.value
+      model.rate_limit = selectedModelRateLimit.value
       await api.updateAIModel(model)
       await loadConfig()
       ElMessage.success('模型参数已保存')
@@ -537,6 +616,73 @@ const handleAddModel = async () => {
     ElMessage.success('模型添加成功')
   } catch (error) {
     ElMessage.error('添加模型失败')
+    console.error(error)
+  }
+}
+
+const editTemplate = (template) => {
+  editingTemplate.value = template.name
+  templateForm.value = {
+    name: template.name,
+    description: template.description || '',
+    model_name: template.model_name || null,
+    prompt_template: template.prompt_template || ''
+  }
+  showAddTemplateDialog.value = true
+}
+
+const closeTemplateDialog = () => {
+  showAddTemplateDialog.value = false
+  editingTemplate.value = null
+  templateForm.value = {
+    name: '',
+    description: '',
+    model_name: null,
+    prompt_template: ''
+  }
+}
+
+const copyToClipboard = (text) => {
+  navigator.clipboard.writeText(text).then(() => {
+    ElMessage.success(`已复制: ${text}`)
+  }).catch(() => {
+    ElMessage.error('复制失败')
+  })
+}
+
+const handleSaveTemplate = async () => {
+  if (!templateForm.value.name || !templateForm.value.prompt_template) {
+    ElMessage.warning('请填写模板名称和提示词模板')
+    return
+  }
+
+  try {
+    if (editingTemplate.value) {
+      await api.updatePromptTemplate(editingTemplate.value, {
+        description: templateForm.value.description,
+        model_name: templateForm.value.model_name,
+        prompt_template: templateForm.value.prompt_template
+      })
+      ElMessage.success('模板已更新')
+    } else {
+      await api.addPromptTemplate(templateForm.value)
+      ElMessage.success('模板已添加')
+    }
+    await loadConfig()
+    closeTemplateDialog()
+  } catch (error) {
+    ElMessage.error(editingTemplate.value ? '更新模板失败' : '添加模板失败')
+    console.error(error)
+  }
+}
+
+const handleDeleteTemplate = async (templateName) => {
+  try {
+    await api.deletePromptTemplate(templateName)
+    promptTemplates.value = promptTemplates.value.filter(t => t.name !== templateName)
+    ElMessage.success(`模板 ${templateName} 已删除`)
+  } catch (error) {
+    ElMessage.error('删除模板失败')
     console.error(error)
   }
 }
@@ -607,6 +753,39 @@ onMounted(() => {
   background: #ecf5ff;
   color: #409eff;
   font-weight: bold;
+}
+
+.template-hints {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f5f7fa;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.hint-label {
+  display: block;
+  margin-bottom: 8px;
+  color: #909399;
+}
+
+.hint-items {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.hint-desc {
+  color: #606266;
+  margin-left: 4px;
+}
+
+.hint-tag {
+  margin-right: 4px;
+}
+
+.hint-tag:hover {
+  opacity: 0.8;
 }
 
 .main-content {

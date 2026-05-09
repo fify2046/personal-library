@@ -114,6 +114,55 @@ class ConfigManager:
         self.config['prompts'][prompt_type] = prompt_template
         self._save_config()
 
+    def get_model_rate_limit(self, model_name: str) -> int:
+        model = self.get_model(model_name)
+        if model:
+            return model.get('rate_limit', 1)
+        return 1
+
+    def set_model_rate_limit(self, model_name: str, rate_limit: int):
+        model = self.get_model(model_name)
+        if model:
+            model['rate_limit'] = rate_limit
+            self.add_model(model)
+
+    def get_prompt_templates(self) -> List[Dict[str, Any]]:
+        self.config = self._load_config()
+        templates = self.config.get('prompt_templates', [])
+        for template in templates:
+            if template.get('api_key'):
+                template['api_key'] = '***' if len(template['api_key']) > 4 else '****'
+        return templates
+
+    def get_prompt_template(self, template_name: str) -> Optional[Dict[str, Any]]:
+        templates = self.get_prompt_templates()
+        for template in templates:
+            if template.get('name') == template_name:
+                return template
+        return None
+
+    def add_prompt_template(self, template: Dict[str, Any]):
+        templates = self.get_prompt_templates()
+        existing_index = None
+        for i, t in enumerate(templates):
+            if t.get('name') == template.get('name'):
+                existing_index = i
+                break
+
+        if existing_index is not None:
+            templates[existing_index] = template
+        else:
+            templates.append(template)
+
+        self.config['prompt_templates'] = templates
+        self._save_config()
+
+    def remove_prompt_template(self, template_name: str):
+        templates = self.get_prompt_templates()
+        templates = [t for t in templates if t.get('name') != template_name]
+        self.config['prompt_templates'] = templates
+        self._save_config()
+
     def get_all_config(self) -> Dict[str, Any]:
         config_copy = self.config.copy()
         for model in config_copy.get('models', []):

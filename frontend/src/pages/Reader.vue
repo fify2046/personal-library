@@ -135,10 +135,36 @@
             <el-icon><MagicStick /></el-icon>
             AI摘要
           </el-button>
+          <el-dropdown v-if="aiEnabled && showAISummary" @command="handleTemplateChange">
+            <el-button type="default">
+              {{ selectedTemplateName || '选择模板' }}
+              <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="">默认提示词</el-dropdown-item>
+                <el-dropdown-item
+                  v-for="template in promptTemplates"
+                  :key="template.name"
+                  :command="template.name"
+                >
+                  {{ template.name }}
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-button
+            v-if="aiEnabled && showAISummary"
+            circle
+            @click="toggleSummaryPosition"
+            :title="summaryPosition === 'right' ? '切换到左侧' : '切换到右侧'"
+          >
+            <el-icon><Switch /></el-icon>
+          </el-button>
         </div>
       </header>
 
-      <aside class="ai-summary-panel" v-if="showAISummary && aiEnabled">
+      <aside class="ai-summary-panel" v-if="showAISummary && aiEnabled" :class="{ 'summary-left': summaryPosition === 'left' }">
         <div class="ai-summary-header">
           <h3>AI摘要</h3>
           <el-button text @click="showAISummary = false">
@@ -172,7 +198,7 @@
       
       <div
         class="content-area"
-        :class="{ 'with-summary': showAISummary && aiEnabled }"
+        :class="{ 'with-summary': showAISummary && aiEnabled, 'summary-left': summaryPosition === 'left' }"
         :style="{ fontSize: fontSize + 'px', lineHeight: lineHeight }"
         ref="contentRef"
         @mousemove="handleContentMouseMove"
@@ -269,7 +295,7 @@ import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from '
 import { useRouter, useRoute } from 'vue-router'
 import {
   Search, Back, Minus, Plus, Document, Picture,
-  ArrowLeft, ArrowRight, Top, Expand, Fold, CaretRight, CaretBottom, MagicStick, Close
+  ArrowLeft, ArrowRight, Top, Expand, Fold, CaretRight, CaretBottom, MagicStick, Close, ArrowDown, Switch
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/utils/api.js'
@@ -322,6 +348,9 @@ const showAISummary = ref(false)
 const aiSummaryContent = ref('')
 const aiSummaryLoading = ref(false)
 const aiTimeout = ref(120000)
+const promptTemplates = ref([])
+const selectedTemplateName = ref('')
+const summaryPosition = ref('right')
 
 const renderedSummary = computed(() => {
   if (!aiSummaryContent.value) return ''
@@ -568,6 +597,39 @@ const checkAIStatus = async () => {
   }
 }
 
+const loadPromptTemplates = async () => {
+  try {
+    const templates = await api.getPromptTemplates()
+    promptTemplates.value = templates || []
+  } catch (error) {
+    console.error('加载提示词模板失败:', error)
+    promptTemplates.value = []
+  }
+}
+
+const loadLocalSettings = () => {
+  const settings = api.getLocalAISettings()
+  selectedTemplateName.value = settings.templateName || ''
+  summaryPosition.value = settings.summaryPosition || 'right'
+}
+
+const saveLocalSettings = () => {
+  api.setLocalAISettings({
+    templateName: selectedTemplateName.value,
+    summaryPosition: summaryPosition.value
+  })
+}
+
+const handleTemplateChange = (templateName) => {
+  selectedTemplateName.value = templateName
+  saveLocalSettings()
+}
+
+const toggleSummaryPosition = () => {
+  summaryPosition.value = summaryPosition.value === 'right' ? 'left' : 'right'
+  saveLocalSettings()
+}
+
 const toggleAISummary = () => {
   showAISummary.value = !showAISummary.value
   if (showAISummary.value && aiEnabled.value && !aiSummaryContent.value) {
@@ -594,7 +656,7 @@ const generateAISummary = async () => {
 
   try {
     aiSummaryLoading.value = true
-    const result = await api.generateSummary([currentChapterId.value], null, aiTimeout.value)
+    const result = await api.generateSummary([currentChapterId.value], null, aiTimeout.value, selectedTemplateName.value || null)
     if (result.success) {
       ElMessage.success('AI摘要生成成功')
       await loadAISummary()
@@ -827,6 +889,8 @@ onMounted(() => {
   fetchChapters()
   loadDisplayMode()
   checkAIStatus()
+  loadPromptTemplates()
+  loadLocalSettings()
   window.addEventListener('keydown', handleKeydown)
 
   setTimeout(() => {
@@ -1255,6 +1319,13 @@ watch(() => route.params.bookId, () => {
   display: flex;
   flex-direction: column;
   z-index: 200;
+  transition: right 0.3s;
+}
+
+.ai-summary-panel.summary-left {
+  right: auto;
+  left: 300px;
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.1);
 }
 
 .ai-summary-header {
@@ -1398,6 +1469,11 @@ watch(() => route.params.bookId, () => {
 
 .content-area.with-summary {
   margin-right: 350px;
+}
+
+.content-area.with-summary.summary-left {
+  margin-right: 0;
+  margin-left: 350px;
 }
 
 @media (max-width: 1200px) {

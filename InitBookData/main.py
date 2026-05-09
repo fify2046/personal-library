@@ -6,7 +6,7 @@ import logging
 import glob
 import json
 from typing import List, Tuple
-from db import get_db_manager
+from db import get_db_manager, get_paths_config, get_db_config, reset_db_manager
 from image_processor import ImageProcessor
 from pdf_extractor import PDFExtractor
 from epub_extractor import EPUBExtractor
@@ -57,6 +57,34 @@ class EbookExtractorApp:
         self._init_dirs()
         self._init_ui()
         self._init_extractors()
+        self._load_db_config()
+
+    def _load_db_config(self):
+        try:
+            db_config = get_db_config()
+            paths_config = get_paths_config()
+            if db_config:
+                self.db_host_entry.delete(0, tk.END)
+                self.db_host_entry.insert(0, db_config.get('host', 'localhost'))
+                self.db_port_entry.delete(0, tk.END)
+                self.db_port_entry.insert(0, str(db_config.get('port', 5432)))
+                self.db_name_entry.delete(0, tk.END)
+                self.db_name_entry.insert(0, db_config.get('database', 'ebook_db'))
+                self.db_user_entry.delete(0, tk.END)
+                self.db_user_entry.insert(0, db_config.get('user', 'postgres'))
+                self.db_pass_entry.delete(0, tk.END)
+                self.db_pass_entry.insert(0, db_config.get('password', ''))
+            if paths_config:
+                images_dir = paths_config.get('images_dir', '')
+                if images_dir:
+                    self.image_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', images_dir)
+                    self.image_dir = os.path.normpath(self.image_dir)
+                    self.image_dir_entry.delete(0, tk.END)
+                    self.image_dir_entry.insert(0, self.image_dir)
+                    self.image_processor = ImageProcessor(self.image_dir)
+                    self._init_extractors()
+        except Exception as e:
+            logger.warning(f"加载配置文件失败: {e}")
 
     def _load_settings(self):
         try:

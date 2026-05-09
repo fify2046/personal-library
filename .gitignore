@@ -97,3 +97,7 @@ dmypy.json
 
 图书提取项目需求.md
 图书展示项目需求.md
+
+.gitignore
+startpg.bat
+stoppg.bat

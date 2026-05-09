@@ -2,11 +2,48 @@ import psycopg2
 from psycopg2 import pool
 import uuid
 import os
+import json
 from typing import Optional, List, Dict, Any, Tuple
 from contextlib import contextmanager
 import logging
 
 logger = logging.getLogger(__name__)
+
+def get_settings_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'settings.json')
+
+def load_settings():
+    settings_path = get_settings_path()
+    if os.path.exists(settings_path):
+        with open(settings_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return None
+
+def get_db_config():
+    settings = load_settings()
+    if settings and 'database' in settings:
+        return settings['database']
+    return {
+        'host': 'localhost',
+        'port': 5432,
+        'database': 'ebook_db',
+        'user': 'postgres',
+        'password': 'postgres'
+    }
+
+def get_paths_config():
+    settings = load_settings()
+    if settings and 'paths' in settings:
+        return settings['paths']
+    return {
+        'images_dir': './images'
+    }
+
+def reset_db_manager():
+    global _db_manager
+    if _db_manager:
+        _db_manager.close_pool()
+        _db_manager = None
 
 
 class DatabaseManager:
@@ -488,9 +525,15 @@ class DatabaseManager:
 _db_manager = None
 
 
-def get_db_manager(host='localhost', port=5432, database='ebook_db',
-                   user='postgres', password='postgres') -> DatabaseManager:
+def get_db_manager(host=None, port=None, database=None,
+                   user=None, password=None) -> DatabaseManager:
     global _db_manager
     if _db_manager is None:
+        db_config = get_db_config()
+        host = host or db_config.get('host', 'localhost')
+        port = port or db_config.get('port', 5432)
+        database = database or db_config.get('database', 'ebook_db')
+        user = user or db_config.get('user', 'postgres')
+        password = password or db_config.get('password', 'postgres')
         _db_manager = DatabaseManager(host, port, database, user, password)
     return _db_manager

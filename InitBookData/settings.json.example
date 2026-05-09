@@ -3,8 +3,8 @@
     "host": "localhost",
     "port": 5432,
     "database": "ebook_db",
-    "user": "ebook",
-    "password": "asdfgh"
+    "user": "your_username",
+    "password": "your_password"
   },
   "paths": {
     "images_dir": "./images"

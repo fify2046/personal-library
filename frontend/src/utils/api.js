@@ -2,7 +2,7 @@ import axios from 'axios'
 
 const apiClient = axios.create({
   baseURL: '/api',
-  timeout: 30000,
+  timeout: 7200000,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -149,14 +149,47 @@ export default {
     return apiClient.get(`/ai/summary/${chapterId}`)
   },
 
-  generateSummary(chapterIds, modelName = null, timeout = 600000) {
+  generateSummary(chapterIds, modelName = null, timeout = 600000, templateName = null) {
     return apiClient.post('/ai/summary/generate',
-      { chapter_ids: chapterIds, model_name: modelName },
+      { chapter_ids: chapterIds, model_name: modelName, template_name: templateName },
       { timeout }
     )
   },
 
   deleteSummary(chapterId) {
     return apiClient.delete(`/ai/summary/${chapterId}`)
+  },
+
+  getPromptTemplates() {
+    return apiClient.get('/config/prompt-templates')
+  },
+
+  addPromptTemplate(data) {
+    return apiClient.post('/config/prompt-templates', data)
+  },
+
+  updatePromptTemplate(templateName, data) {
+    return apiClient.put(`/config/prompt-templates/${encodeURIComponent(templateName)}`, data)
+  },
+
+  deletePromptTemplate(templateName) {
+    return apiClient.delete(`/config/prompt-templates/${encodeURIComponent(templateName)}`)
+  },
+
+  getModelRateLimit(modelName) {
+    return apiClient.get(`/config/models/${encodeURIComponent(modelName)}/rate-limit`)
+  },
+
+  setModelRateLimit(modelName, rateLimit) {
+    return apiClient.put(`/config/models/${encodeURIComponent(modelName)}/rate-limit`, null, { params: { rate_limit: rateLimit } })
+  },
+
+  getLocalAISettings() {
+    const settings = localStorage.getItem('ai_settings')
+    return settings ? JSON.parse(settings) : { templateName: null, summaryPosition: 'right' }
+  },
+
+  setLocalAISettings(settings) {
+    localStorage.setItem('ai_settings', JSON.stringify(settings))
   }
 }

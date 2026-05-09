@@ -9,8 +9,39 @@ from config import config_manager
 from ai import create_ai_service
 from datetime import datetime
 import logging
+import time
+import threading
 
 logger = logging.getLogger(__name__)
+
+class RateLimiter:
+    def __init__(self):
+        self.call_times = {}
+        self.lock = threading.Lock()
+
+    def acquire(self, model_name: str, rate_limit: int) -> bool:
+        current_time = time.time()
+        with self.lock:
+            if model_name not in self.call_times:
+                self.call_times[model_name] = []
+            self.call_times[model_name] = [
+                t for t in self.call_times[model_name]
+                if current_time - t < 1.0
+            ]
+            if len(self.call_times[model_name]) < rate_limit:
+                self.call_times[model_name].append(current_time)
+                return True
+            return False
+
+    def wait_for_slot(self, model_name: str, rate_limit: int, timeout: float = 60):
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self.acquire(model_name, rate_limit):
+                return True
+            time.sleep(0.1)
+        return False
+
+rate_limiter = RateLimiter()
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -28,6 +59,7 @@ class ChapterSummaryResponse(BaseModel):
 class GenerateSummaryRequest(BaseModel):
     chapter_ids: List[str]
     model_name: Optional[str] = None
+    template_name: Optional[str] = None
 
 class GenerateSummaryResponse(BaseModel):
     success: bool
@@ -84,9 +116,24 @@ def generate_summary(request: GenerateSummaryRequest, db: Session = Depends(get_
     if not model_config.get('api_key'):
         raise HTTPException(status_code=400, detail=f"模型 {model_name} 未配置API密钥")
 
-    prompt_template = config_manager.get_prompt('summary')
+    prompt_template = None
+    template_name = request.template_name
+    if template_name:
+        template = config_manager.get_prompt_template(template_name)
+        if template:
+            prompt_template = template.get('prompt_template')
+            if template.get('model_name') and not request.model_name:
+                model_name = template['model_name']
+                model_config = config_manager.get_model(model_name)
+                if not model_config:
+                    raise HTTPException(status_code=404, detail=f"模板关联的模型 {model_name} 不存在")
+
+    if not prompt_template:
+        prompt_template = config_manager.get_prompt('summary')
     if not prompt_template:
         raise HTTPException(status_code=400, detail="未配置摘要生成提示词")
+
+    rate_limit = model_config.get('rate_limit', 1)
 
     try:
         ai_service = create_ai_service(
@@ -105,6 +152,10 @@ def generate_summary(request: GenerateSummaryRequest, db: Session = Depends(get_
 
     for chapter_id in request.chapter_ids:
         try:
+            if not rate_limiter.wait_for_slot(model_name, rate_limit, timeout=300):
+                errors.append(f"章节 {chapter_id} 限速等待超时")
+                continue
+
             chapter = db.query(Chapter).filter(Chapter.chapter_id == chapter_id).first()
             if not chapter:
                 errors.append(f"章节 {chapter_id} 不存在")

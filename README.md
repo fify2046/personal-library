@@ -34,6 +34,15 @@
 - 目录全部展开/收缩
 - 生成AI摘要
 
+### 🤖 AI 辅助功能
+- 支持多种 AI 模型（OpenAI、Anthropic、MiniMax、GLM、Doubao、Deepseek、Google AI 等）
+- 支持本地部署模型（Ollama、LM Studio）
+- **提示词模板管理**：可创建多个模板，每个模板可配置不同的提示词和关联模型
+- **限速设置**：可配置每个模型每秒最多调用次数（1-10次/秒）
+- **模板选择**：图书详情页和阅读页支持选择不同的模板生成摘要
+- **摘要位置切换**：AI 摘要可显示在阅读区左侧或右侧
+- 设置自动保存到本地，无需重复配置
+
 ### ⭐ 收藏与列表
 - 收藏喜欢的书籍
 - 正在阅读列表
@@ -232,6 +241,46 @@ IMAGES_DIR=../images
 
 前端配置文件位于 `frontend/vite.config.js`，默认代理到后端 `http://localhost:8000`。
 
+### AI 功能配置
+
+AI 功能配置保存在 `backend/config/system_config.json` 文件中：
+
+```json
+{
+  "ai_enabled": true,
+  "default_model": "gpt-4",
+  "min_content_length": 300,
+  "models": [
+    {
+      "name": "gpt-4",
+      "platform": "OpenAI",
+      "api_key": "your-api-key",
+      "rate_limit": 5,
+      "parameters": {
+        "temperature": 0.7,
+        "max_tokens": 1000,
+        "timeout": 120
+      }
+    }
+  ],
+  "prompt_templates": [
+    {
+      "name": "小说摘要",
+      "description": "用于生成小说章节摘要",
+      "prompt_template": "请为以下小说章节生成简洁的摘要：\n\n{content}"
+    }
+  ]
+}
+```
+
+主要配置项说明：
+- `ai_enabled` - AI 功能开关
+- `default_model` - 默认使用的 AI 模型
+- `min_content_length` - 生成摘要的最小内容字数
+- `models` - AI 模型列表
+  - `rate_limit` - 每秒最多调用次数（1-10）
+- `prompt_templates` - 自定义提示词模板列表
+
 ## 📖 使用说明
 
 ### 导入书籍
@@ -254,6 +303,15 @@ IMAGES_DIR=../images
 3. 使用目录导航章节
 4. 支持简繁体切换
 5. 使用全部展开/收缩按钮管理目录
+
+### 使用 AI 摘要功能
+
+1. 在系统管理页面配置 AI 模型（API密钥、参数等）
+2. 创建提示词模板（可选，支持多个模板）
+3. 在阅读页点击"AI摘要"按钮打开摘要面板
+4. 选择模板后点击"生成AI摘要"
+5. 摘要生成后可切换显示位置（左侧/右侧）
+6. 模板选择和位置设置会自动保存到本地
 
 ### 管理收藏
 

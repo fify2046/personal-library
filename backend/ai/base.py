@@ -59,9 +59,13 @@ class AnthropicService(BaseAIService):
             import anthropic
             prompt = self.format_prompt(prompt_template, chapter_name, content)
 
+            base_url = self.base_url.rstrip('/')
+            if base_url.endswith('/v1/messages'):
+                base_url = base_url[:-len('/v1/messages')]
+
             client = anthropic.Anthropic(
                 api_key=self.api_key,
-                base_url=self.base_url.rstrip('/')
+                base_url=base_url
             )
 
             max_tokens = self.parameters.get('max_tokens', 1000)

@@ -119,6 +119,19 @@
         勾选需要生成AI摘要的章节，然后点击"生成AI摘要"按钮。已生成摘要的章节会显示绿色标记。
       </el-alert>
 
+      <div style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+        <span style="font-weight: 500;">选择模板：</span>
+        <el-select v-model="selectedTemplateName" placeholder="选择模板" clearable style="width: 200px;">
+          <el-option label="默认提示词" value="" />
+          <el-option
+            v-for="template in promptTemplates"
+            :key="template.name"
+            :label="template.name"
+            :value="template.name"
+          />
+        </el-select>
+      </div>
+
       <div style="max-height: 400px; overflow-y: auto;">
         <el-tree
           :data="chapterTreeData"
@@ -197,6 +210,8 @@ const generatingSummary = ref(false)
 const chapterTreeRef = ref(null)
 const chapterSummaries = ref({})
 const aiTimeout = ref(120000)
+const promptTemplates = ref([])
+const selectedTemplateName = ref('')
 const editForm = ref({
   title: '',
   author: '',
@@ -330,8 +345,24 @@ const checkAIStatus = async () => {
   }
 }
 
+const loadPromptTemplates = async () => {
+  try {
+    const templates = await api.getPromptTemplates()
+    promptTemplates.value = templates || []
+  } catch (error) {
+    console.error('加载提示词模板失败:', error)
+    promptTemplates.value = []
+  }
+}
+
+const loadLocalTemplate = () => {
+  const settings = api.getLocalAISettings()
+  selectedTemplateName.value = settings.templateName || ''
+}
+
 const showAISummaryDialog = async () => {
   aiSummaryDialogVisible.value = true
+  loadLocalTemplate()
   await loadChapterSummaries()
 }
 
@@ -393,17 +424,22 @@ const generateAISummary = async () => {
 
   try {
     generatingSummary.value = true
-    const result = await api.generateSummary(chapterIds, null, aiTimeout.value)
+    const templateName = selectedTemplateName.value || null
+    const result = await api.generateSummary(chapterIds, null, aiTimeout.value, templateName)
 
     if (result.success) {
       ElMessage.success(result.message)
-      await loadChapterSummaries()
+      const settings = api.getLocalAISettings()
+      settings.templateName = selectedTemplateName.value
+      api.setLocalAISettings(settings)
     } else {
       ElMessage.warning(result.message)
     }
+    await loadChapterSummaries()
   } catch (error) {
     ElMessage.error('生成摘要失败')
     console.error(error)
+    await loadChapterSummaries()
   } finally {
     generatingSummary.value = false
   }
@@ -412,6 +448,7 @@ const generateAISummary = async () => {
 onMounted(() => {
   fetchBookDetail()
   checkAIStatus()
+  loadPromptTemplates()
 })
 </script>
 
