@@ -89,7 +89,7 @@ npm run dev
 
 ## API 代理
 
-开发环境下，Vite 配置了 `/api` 到 `http://localhost:8000/api` 的代理。
+开发环境下，Vite 配置了 `/api` 到 `http://localhost:12001/api` 的代理。
 
 ## 路由配置
 

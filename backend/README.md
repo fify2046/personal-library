@@ -104,10 +104,10 @@ DATABASE_URL=postgresql://your_username:your_password@localhost:5432/ebook_db
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn main:app --reload --host 0.0.0.0 --port 12001
 ```
 
-API 文档访问地址：`http://localhost:8000/docs`
+API 文档访问地址：`http://localhost:12001/docs`
 
 ## 数据库说明
 

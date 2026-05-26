@@ -213,7 +213,7 @@ start.bat
 启动后端：
 ```bash
 cd backend
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn main:app --reload --host 0.0.0.0 --port 12001
 ```
 
 启动前端：
@@ -239,7 +239,7 @@ IMAGES_DIR=../images
 
 ### 前端配置
 
-前端配置文件位于 `frontend/vite.config.js`，默认代理到后端 `http://localhost:8000`。
+前端配置文件位于 `frontend/vite.config.js`，默认代理到后端 `http://localhost:12001`。
 
 ### AI 功能配置
 

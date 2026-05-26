@@ -34,4 +34,4 @@ def root():
 if __name__ == "__main__":
     os.makedirs(config.IMAGES_DIR, exist_ok=True)
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=12001)
